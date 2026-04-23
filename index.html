@@ -1048,11 +1048,10 @@ const state = {
 
   stepMmXY: 0.1,
   stepMmZ: 0.1,
-  overshootMm: 20,
-  // CoreXY motor-exercise: make Y overshoot different from X so both motors
-  // (A=X+Y, B=X−Y) get unequal step counts during approach. Final return
-  // move lands exactly on target — asymmetry is in the overshoot leg only.
-  overshootYMm: 16,
+  // Backlash-kill overshoot distance in mm. Approach targets from a consistent
+  // direction so mechanical backlash is always pulled tight the same way.
+  // Landing position is rounded to 0.5mm grid for repeatable approach pose.
+  overshootMm: 2,
   feedrateFast: 3000,
   feedrateFine: 1500,
   feedrateZ: 600,
@@ -2249,7 +2248,9 @@ async function pickToolAndGoToRef(toolIdx) {
       await withBusy('Moving to P_ref', `Overshoot + return to (${state.t0RefXY.x.toFixed(2)}, ${state.t0RefXY.y.toFixed(2)})`, null,
         async () => {
           await sendGcode('G90');
-          await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+          const ovX = overshootLanding(state.t0RefXY.x, +1);
+          const ovY = overshootLanding(state.t0RefXY.y, +1);
+          await sendGcode(`G1 X${ovX.toFixed(3)} Y${ovY.toFixed(3)} F${state.feedrateFast}`);
           await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
           await waitAndSyncPos();
         });
@@ -2430,25 +2431,22 @@ async function runPendingJog() {
         // Final targets
         const fX = cur.x + pDelta.x;
         const fY = cur.y + pDelta.y;
-        // Overshoot: if that axis is moving, overshoot past final by its own amount.
-        // If axis is NOT moving, still push Y (or X) during overshoot by the smaller
-        // amount so BOTH CoreXY motors do unequal work. Sign chosen to match the
-        // moving axis when possible, else positive.
         const xSign = pDelta.x >= 0 ? 1 : -1;
         const ySign = pDelta.y >= 0 ? 1 : -1;
         let ovXfinal, ovYfinal;
         if (pDelta.x !== 0 && pDelta.y !== 0) {
-          // Both axes moving — overshoot each past its own target
-          ovXfinal = fX + xSign * state.overshootMm;
-          ovYfinal = fY + ySign * state.overshootYMm;
+          // Both axes moving (batched X+Y press) — diagonal overshoot,
+          // each axis overshoots its own final target.
+          ovXfinal = overshootLanding(fX, xSign);
+          ovYfinal = overshootLanding(fY, ySign);
         } else if (pDelta.x !== 0) {
-          // Pure X jog — overshoot X big, jitter Y small (same sign as X) during overshoot, return to cur.y on fine leg
-          ovXfinal = fX + xSign * state.overshootMm;
-          ovYfinal = cur.y + xSign * state.overshootYMm;
+          // Pure X jog — overshoot X only, Y stays put
+          ovXfinal = overshootLanding(fX, xSign);
+          ovYfinal = cur.y;
         } else {
-          // Pure Y jog
-          ovXfinal = cur.x + ySign * state.overshootYMm;
-          ovYfinal = fY + ySign * state.overshootMm;
+          // Pure Y jog — overshoot Y only, X stays put
+          ovXfinal = cur.x;
+          ovYfinal = overshootLanding(fY, ySign);
         }
         await sendGcode(`G1 X${ovXfinal.toFixed(4)} Y${ovYfinal.toFixed(4)} F${state.feedrateFast}`);
         await sendGcode(`G1 X${fX.toFixed(4)} Y${fY.toFixed(4)} F${state.feedrateFine}`);
@@ -2482,6 +2480,20 @@ function fmtStep(s) {
   if (s >= 1)  return String(s);
   if (s >= 0.1) return s.toFixed(1);
   return s.toFixed(2);
+}
+
+// Compute overshoot landing position: pos + sign * overshootMm, rounded to 0.5mm grid.
+// Ensures we always approach final target from a consistent, clean grid position.
+// If rounding lands closer to pos than overshoot requested (rare edge case),
+// push one more 0.5mm step in the sign direction so the landing is always
+// past the final target.
+function overshootLanding(finalPos, sign) {
+  const raw = finalPos + sign * state.overshootMm;
+  let rounded = Math.round(raw * 2) / 2;
+  // Guarantee we're still past finalPos (rounding could pull us back)
+  if (sign > 0 && rounded <= finalPos) rounded += 0.5;
+  if (sign < 0 && rounded >= finalPos) rounded -= 0.5;
+  return rounded;
 }
 
 function renderJogPad() {
@@ -3028,12 +3040,14 @@ async function calibrateTool(toolIdx) {
     await withBusy(`Picking T${toolIdx}`, `Tool change in progress`, `T${toolIdx}`,
       async () => await sendGcode(`T${toolIdx}`));
     // Overshoot + return: kills mechanical backlash after tool change by
-    // approaching P_ref from a consistent direction every time. X and Y
-    // overshoot amounts differ (20/16) so CoreXY motors do unequal work.
-    await withBusy('Moving to reference', `Overshoot +X${state.overshootMm} +Y${state.overshootYMm}mm, return to P_ref`, null,
+    // approaching P_ref from a consistent direction. 2D diagonal overshoot
+    // from (+X, +Y) direction, landing rounded to 0.5mm grid.
+    await withBusy('Moving to reference', `2D overshoot +${state.overshootMm}mm, return to P_ref`, null,
       async () => {
         await sendGcode('G90');
-        await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+        const ovX = overshootLanding(state.t0RefXY.x, +1);
+        const ovY = overshootLanding(state.t0RefXY.y, +1);
+        await sendGcode(`G1 X${ovX.toFixed(3)} Y${ovY.toFixed(3)} F${state.feedrateFast}`);
         await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
         await waitAndSyncPos();
       });
@@ -3066,13 +3080,15 @@ async function doubleCheckBeforeSave(toolIdx) {
   }
 
   wizard(`T${toolIdx} — Double check`,
-    `Backlash-kill move: +X${state.overshootMm}/+Y${state.overshootYMm} then back (CoreXY motor-exercise). Watch zoom view.`, []);
+    `Backlash-kill move: 2D overshoot +${state.overshootMm}mm, round landing, return. Watch zoom view.`, []);
 
   try {
-    await withBusy('Backlash kill', `+X${state.overshootMm}/+Y${state.overshootYMm} overshoot then return`, null, async () => {
+    await withBusy('Backlash kill', `2D overshoot +${state.overshootMm}mm then return`, null, async () => {
       const cur = await getCurrentXY();
       await sendGcode('G90');
-      await sendGcode(`G1 X${(cur.x + state.overshootMm).toFixed(3)} Y${(cur.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+      const ovX = overshootLanding(cur.x, +1);
+      const ovY = overshootLanding(cur.y, +1);
+      await sendGcode(`G1 X${ovX.toFixed(3)} Y${ovY.toFixed(3)} F${state.feedrateFast}`);
       await sendGcode(`G1 X${cur.x.toFixed(3)} Y${cur.y.toFixed(3)} F${state.feedrateFine}`);
       await waitAndSyncPos();
     });
@@ -3149,7 +3165,9 @@ async function saveAndVerifyTool(toolIdx) {
     await withBusy('Verifying position', 'Moving to reference with new offset', null,
       async () => {
         await sendGcode('G90');
-        await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+        const ovX = overshootLanding(state.t0RefXY.x, +1);
+        const ovY = overshootLanding(state.t0RefXY.y, +1);
+        await sendGcode(`G1 X${ovX.toFixed(3)} Y${ovY.toFixed(3)} F${state.feedrateFast}`);
         await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
         await waitAndSyncPos();
       });
@@ -3265,7 +3283,9 @@ async function revalidateTool(toolIdx) {
     await withBusy('Moving to reference', 'Overshoot + return to P_ref', null,
       async () => {
         await sendGcode('G90');
-        await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+        const ovX = overshootLanding(state.t0RefXY.x, +1);
+        const ovY = overshootLanding(state.t0RefXY.y, +1);
+        await sendGcode(`G1 X${ovX.toFixed(3)} Y${ovY.toFixed(3)} F${state.feedrateFast}`);
         await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
         await waitAndSyncPos();
       });
