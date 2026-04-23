@@ -951,6 +951,8 @@
                 <button id="btnRefreshPos" class="pos-refresh" title="Re-read M114">↻</button>
                 <span class="row-label tx" id="posTxLabel">T—</span>
                 <span class="row-val" id="posCurXY">— / —</span>
+                <span class="row-label" id="posZLabel" style="display:none; color:var(--accent);">Z</span>
+                <span class="row-val" id="posCurZ" style="display:none;">—</span>
               </div>
             </div>
 
@@ -1121,14 +1123,26 @@ function setCurrentToolUI(idx) {
   state.currentTool = idx;
 }
 
-// Update the live position display (T0 ref + current tool).
+// Update the live position display (T0 ref + current tool + optional Z).
 // Called automatically every time an M114 response comes back for current tool.
 function setPosDisplay(x, y, z) {
   if (x !== null && x !== undefined && y !== null && y !== undefined) {
     $('posCurXY').textContent = `X ${x.toFixed(3)} Y ${y.toFixed(3)}`;
     $('posCurXY').classList.remove('stale');
   }
-  // z ignored for new display (not shown) — keep param for backward compat
+  if (z !== null && z !== undefined) {
+    $('posCurZ').textContent = z.toFixed(3);
+    $('posCurZ').classList.remove('stale');
+  }
+}
+
+// Show/hide the Z row. Called when stage changes — we only care about Z during
+// the focus step (Stage E) since that's the only time Z jog is active.
+function updateZRowVisibility() {
+  const show = (state.stage === 'positionT0');
+  const display = show ? '' : 'none';
+  $('posZLabel').style.display = display;
+  $('posCurZ').style.display = display;
 }
 
 function updatePosRefDisplay() {
@@ -1143,6 +1157,7 @@ function updatePosRefDisplay() {
 // haven't re-queried yet). Display dims until next M114.
 function markPosStale() {
   $('posCurXY').classList.add('stale');
+  $('posCurZ').classList.add('stale');
 }
 
 // Parse an M114 response and update the header. Also returns the
@@ -1200,6 +1215,7 @@ function setStage(s) {
   updateZLockState();
   updateJogEnabled();
   updateReticleLockedUI();
+  updateZRowVisibility();
 }
 
 function updateZLockState() {
@@ -2276,7 +2292,9 @@ async function restoreOriginalOffsets() {
   if (!state.printerConnected) { log('Not connected', 'err'); return; }
   const confirm = await askUser(
     'Restore original offsets?',
-    `This will overwrite all current offsets with the values read when you connected. <b>${state.originalOffsets.length}</b> tools will be restored, then saved to EEPROM.`,
+    `This will overwrite all current offsets with the values read when you connected. <b>${state.originalOffsets.length}</b> tools will be restored (X, Y, Z), then saved to EEPROM.
+    <br><br>
+    <span style="color:var(--warn); font-size:10px;">Note: restores Z values captured when this session started. If a prior session zeroed out Z offsets, re-run Prusa's Nozzle Offset calibration instead (Calibrations → Nozzle Offset).</span>`,
     [
       { label: 'Restore and save', kind: 'danger' },
       { label: 'Cancel', kind: '' }
@@ -2288,7 +2306,8 @@ async function restoreOriginalOffsets() {
   try {
     for (let i = 0; i < state.originalOffsets.length; i++) {
       const o = state.originalOffsets[i];
-      const cmd = `M218 T${i} X${o.x.toFixed(4)} Y${o.y.toFixed(4)}`;
+      // Include Z explicitly so Buddy firmware doesn't reset it to 0.
+      const cmd = `M218 T${i} X${o.x.toFixed(4)} Y${o.y.toFixed(4)} Z${(o.z ?? 0).toFixed(4)}`;
       await withBusy(`Writing T${i}`, cmd, cmd,
         async () => await sendGcode(cmd));
     }
@@ -3140,21 +3159,35 @@ async function saveAndVerifyTool(toolIdx) {
       x: state.t0RefXY.x - pAligned.x,
       y: state.t0RefXY.y - pAligned.y,
     };
+    // CRITICAL: Z MUST come from the connect-time snapshot (state.originalOffsets),
+    // NEVER from the current M218 read (cur.z). If a prior session wrote a bad
+    // M218 that zeroed Z, cur.z will be 0 — echoing that back would permanently
+    // lose the real Z calibration. Using originalOffsets captures Z as it was
+    // at the moment the user connected, before our tool touched anything.
+    const origZ = (state.originalOffsets && state.originalOffsets[toolIdx])
+      ? state.originalOffsets[toolIdx].z
+      : null;
+    if (origZ === null || origZ === undefined) {
+      throw new Error(`No original Z snapshot for T${toolIdx} — refusing to write M218 without confirmed Z. Reconnect printer first.`);
+    }
     const newOff = {
       x: cur.x + correction.x,
       y: cur.y + correction.y,
-      z: cur.z,  // Z preserved — never written
+      z: origZ,  // ALWAYS from snapshot — never from current M218 read
     };
 
     log(`T${toolIdx} offset math:`, 'sys');
     log(`  P_ref     (T0 at reticle)   = (${state.t0RefXY.x.toFixed(4)}, ${state.t0RefXY.y.toFixed(4)})`, 'sys');
     log(`  P_aligned (T${toolIdx} at reticle)  = (${pAligned.x.toFixed(4)}, ${pAligned.y.toFixed(4)})`, 'sys');
-    log(`  cur offset (M218)           = X${cur.x.toFixed(4)} Y${cur.y.toFixed(4)} Z${cur.z.toFixed(4)}`, 'sys');
+    log(`  cur offset (M218 now)       = X${cur.x.toFixed(4)} Y${cur.y.toFixed(4)} Z${cur.z.toFixed(4)}`, 'sys');
+    log(`  original Z (from connect)   = ${origZ.toFixed(4)} ← will be written back`, 'sys');
     log(`  correction = P_ref−P_align  = (${correction.x.toFixed(4)}, ${correction.y.toFixed(4)})`, 'sys');
-    log(`  new offset = cur+correction = X${newOff.x.toFixed(4)} Y${newOff.y.toFixed(4)} Z${newOff.z.toFixed(4)} (Z preserved)`, 'sys');
+    log(`  new offset                  = X${newOff.x.toFixed(4)} Y${newOff.y.toFixed(4)} Z${newOff.z.toFixed(4)} (Z from original snapshot)`, 'sys');
 
-    // Write only X and Y. Z preserved by firmware since not passed.
-    const writeCmd = `M218 T${toolIdx} X${newOff.x.toFixed(4)} Y${newOff.y.toFixed(4)}`;
+    // Write X, Y AND Z. Z comes from the connect-time snapshot so we never echo
+    // a potentially-corrupted 0 back into EEPROM. Buddy may reset Z to 0 if Z is
+    // omitted from M218 — so we always pass it explicitly.
+    const writeCmd = `M218 T${toolIdx} X${newOff.x.toFixed(4)} Y${newOff.y.toFixed(4)} Z${newOff.z.toFixed(4)}`;
     await withBusy('Writing offset', writeCmd, writeCmd,
       async () => {
         await sendGcode(writeCmd);
