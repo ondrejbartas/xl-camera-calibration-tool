@@ -123,12 +123,17 @@
     align-self: start;
     overflow-y: auto;
     max-height: 100%;
+    width: 280px;         /* fixed column width so aspect-ratio resolves correctly */
+    flex-shrink: 0;
   }
   .minimap-stage {
     position: relative; background: #000;
     border: 1px solid var(--border);
     aspect-ratio: 16 / 9; overflow: hidden;
-    cursor: crosshair; width: 100%;
+    cursor: crosshair;
+    width: 100%;
+    min-height: 157px;    /* 280 × 9/16 = 157.5 — guarantee visible even if aspect-ratio layout fails */
+    flex-shrink: 0;       /* never let it collapse below min-height */
   }
   .minimap-stage.locked { cursor: not-allowed; }
   .minimap-stage video {
