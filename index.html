@@ -1,0 +1,3337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>XL Offset Calibrator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0b0d;
+    --panel: #14161a;
+    --panel-2: #1c1f24;
+    --border: #2a2e36;
+    --text: #e8eaed;
+    --dim: #8a9099;
+    --accent: #ff6b1a;
+    --good: #4ade80;
+    --bad: #ef4444;
+    --warn: #fbbf24;
+    --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font-family: 'Archivo', system-ui, sans-serif; min-height: 100vh; }
+  code, pre, .mono { font-family: 'JetBrains Mono', monospace; }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 10px 18px;
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(10, 11, 13, 0.95);
+  }
+  header h1 { font-weight: 800; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; }
+  header h1 span { color: var(--accent); }
+  .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; padding: 3px 9px;
+    border: 1px solid var(--border); border-radius: 2px;
+    color: var(--dim); margin-left: 6px;
+  }
+  .pill.on { color: var(--good); border-color: var(--good); }
+
+  main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    height: calc(100vh - 44px);
+    background: var(--border); gap: 1px;
+  }
+  .sidebar { background: var(--bg); padding: 14px; overflow-y: auto; }
+  .work    { background: var(--bg); padding: 14px; overflow: hidden; display: flex; flex-direction: column; gap: 12px; position: relative; }
+
+  .section { margin-bottom: 14px; }
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.15em;
+    color: var(--accent); margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::before { content:''; width:10px; height:1px; background: var(--accent); }
+
+  button, select, input {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--border);
+    padding: 7px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    border-radius: 2px; width: 100%; cursor: pointer;
+    transition: all 0.12s;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
+  button.primary:hover:not(:disabled) { background: #ff8547; }
+  button.good { border-color: var(--good); color: var(--good); }
+  button.good:hover:not(:disabled) { background: var(--good); color: #000; }
+  button.danger { border-color: var(--bad); color: var(--bad); }
+  button.danger:hover:not(:disabled) { background: var(--bad); color: #000; }
+
+  .btn-row { display: grid; gap: 5px; grid-template-columns: 1fr 1fr; }
+  label {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+  .field { margin-bottom: 8px; }
+
+  /* STAGES */
+  .stages {
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 10px;
+  }
+  .stage-li {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px; color: var(--dim);
+    padding: 4px 0;
+  }
+  .stage-li .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    font-size: 10px; flex-shrink: 0;
+  }
+  .stage-li.current { color: var(--accent); }
+  .stage-li.current .num { border-color: var(--accent); color: var(--accent); background: rgba(255,107,26,0.1); }
+  .stage-li.done { color: var(--good); }
+  .stage-li.done .num { border-color: var(--good); color: var(--good); }
+
+  /* TOP ROW */
+  .top-row {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 12px; min-height: 0; flex: 1;
+    overflow: hidden;
+  }
+  .minimap {
+    display: flex; flex-direction: column; gap: 8px;
+    align-self: start;
+    overflow-y: auto;
+    max-height: 100%;
+  }
+  .minimap-stage {
+    position: relative; background: #000;
+    border: 1px solid var(--border);
+    aspect-ratio: 16 / 9; overflow: hidden;
+    cursor: crosshair; width: 100%;
+  }
+  .minimap-stage.locked { cursor: not-allowed; }
+  .minimap-stage video {
+    display: none;
+  }
+  .minimap-stage canvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; object-fit: contain;
+  }
+
+  .zoom-col {
+    display: flex; flex-direction: column;
+    min-height: 0; min-width: 0; align-items: stretch; flex: 1;
+    overflow: hidden;
+  }
+  .zoom-col-inner {
+    flex: 1; min-height: 0; min-width: 0;
+    display: flex; justify-content: center; align-items: center;
+    overflow: hidden;
+  }
+  .zoom-stage {
+    position: relative; background: #000;
+    border: 1px solid var(--border);
+    overflow: hidden; cursor: move;
+    aspect-ratio: 1 / 1;
+    align-self: center;
+    /* Lock to smallest of (row height, column width) — aspect-ratio
+       keeps it square. Sizing works both when row is tall/narrow and
+       when row is short/wide. */
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    min-width: 0;
+    min-height: 0;
+    object-fit: contain;
+  }
+  .zoom-stage.locked { cursor: default; }
+  .zoom-stage canvas {
+    position: absolute;
+    /* Center via margin-auto + inset-0, let object-fit handle aspect */
+    top: 0; left: 0; right: 0; bottom: 0;
+    margin: auto;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+  }
+
+  .stage-hud {
+    position: absolute; top: 6px; left: 6px; right: 6px;
+    display: flex; justify-content: space-between; gap: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    pointer-events: none; z-index: 5;
+  }
+  .stage-hud .tag {
+    background: rgba(0,0,0,0.7); padding: 2px 7px;
+    border: 1px solid var(--accent); color: var(--accent);
+  }
+  .stage-hud .tag.green { border-color: var(--good); color: var(--good); }
+  .stage-hud .tag.locked { border-color: var(--warn); color: var(--warn); }
+
+  .stage-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px; color: var(--dim);
+    letter-spacing: 0.15em; text-transform: uppercase;
+    margin-bottom: 4px;
+    display: flex; justify-content: space-between;
+  }
+  .stage-title .hint { color: var(--dim); opacity: 0.7; text-transform: none; letter-spacing: 0; }
+
+  .jog-block { border: 1px solid var(--border); padding: 10px; background: var(--panel); }
+  .jog-header {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    margin-bottom: 10px;
+  }
+  .jog-header-top {
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .jog-header-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .jog-header-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .jog-header-pos {
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr auto 1fr auto;
+    gap: 4px 6px;
+    align-items: center;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  /* Two-line ref/current display */
+  .pos-rows {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    gap: 2px 8px;
+    align-items: center;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+  .pos-rows .row-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+  .pos-rows .row-label.t0 { color: var(--good); }
+  .pos-rows .row-label.tx { color: var(--accent); }
+  .pos-rows .row-val {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .pos-rows .row-val.stale { color: var(--dim); opacity: 0.6; }
+  .pos-rows .row-refresh {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-self: end;
+  }
+  .pos-axis {
+    font-size: 9px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .pos-val {
+    font-size: 11px;
+    color: var(--text);
+    font-weight: 500;
+    text-align: right;
+    padding-right: 4px;
+  }
+  .pos-val.stale { color: var(--dim); opacity: 0.6; }
+  .pos-refresh {
+    width: auto !important;
+    padding: 2px 8px !important;
+    font-size: 12px !important;
+    line-height: 1;
+    color: var(--dim);
+    border-color: var(--border);
+    background: var(--panel);
+  }
+  .pos-refresh:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  /* Jog pad: uniform grid table. Center at (7,7) in a 15×15 grid.
+     Each cell is 12×12px. Y buttons span via colspan, X buttons span via rowspan.
+     Outer button at step i uses span = 2i+1 (innermost i=0 → 1 cell,
+     outermost i=6 → 13 cells). */
+  .jogpad-table {
+    margin: 6px auto;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: fixed;
+  }
+  .jogpad-table td {
+    padding: 0;
+    margin: 0;
+    text-align: center;
+    vertical-align: middle;
+    width: 12px;
+    height: 12px;
+    min-width: 12px;
+    min-height: 12px;
+    max-width: 12px;
+    max-height: 12px;
+  }
+  .jogpad-table button {
+    padding: 0;
+    margin: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    line-height: 1;
+    box-sizing: border-box;
+  }
+  .jogpad-table button:hover:not(:disabled) {
+    background: var(--accent); border-color: var(--accent); color: #000; z-index: 2;
+  }
+  .jogpad-table button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .jogpad-table td.center-cell {
+    border: 1px dashed var(--border);
+    color: var(--dim);
+    font-size: 10px;
+    background: rgba(255,255,255,0.02);
+  }
+  /* Font size grows subtly with button size (step index 0..6) */
+  .jogpad-table button.step-i3,
+  .jogpad-table button.step-i4 { font-size: 12px; }
+  .jogpad-table button.step-i5,
+  .jogpad-table button.step-i6 { font-size: 14px; font-weight: 700; }
+
+  /* Z jog: 11-row table (5 Z- above, divider, 5 Z+ below). Each row has a single
+     <td> with colspan to make outer buttons wider. Cells are 14×14. */
+  .zjog-table {
+    margin: 6px auto;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: fixed;
+  }
+  .zjog-table td {
+    padding: 0;
+    margin: 0;
+    width: 14px;
+    height: 14px;
+    min-width: 14px;
+    min-height: 14px;
+    max-width: 14px;
+    max-height: 14px;
+    text-align: center;
+  }
+  .zjog-table button {
+    padding: 0;
+    margin: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    line-height: 1;
+    box-sizing: border-box;
+  }
+  .zjog-table button:hover:not(:disabled) {
+    background: var(--accent); border-color: var(--accent); color: #000;
+  }
+  .zjog-table button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .zjog-table tr.zdivider td {
+    border-top: 1px dashed var(--border);
+    background: rgba(255,255,255,0.02);
+  }
+  .zjog-table button.zstep-i3,
+  .zjog-table button.zstep-i4 { font-size: 13px; font-weight: 700; }
+
+  /* Legacy — still referenced by some stages, keep minimal styles */
+  .step-pills {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 10px;
+  }
+  .step-pills button { padding: 5px 1px; font-size: 9.5px; }
+  .step-pills button.active {
+    background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700;
+  }
+  .axis-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+
+  .jog-pending {
+    margin-top: 8px; text-align: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--warn); min-height: 14px;
+  }
+
+  .offsets-panel {
+    border: 1px solid var(--border); background: var(--panel);
+    padding: 10px; overflow: auto;
+    flex-shrink: 0; max-height: 280px;
+  }
+  table.offsets { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
+  table.offsets th {
+    text-align: left; color: var(--dim); font-size: 9px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 6px 6px; border-bottom: 1px solid var(--border); font-weight: 400;
+    white-space: nowrap;
+  }
+  table.offsets td { padding: 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.offsets tr.active td { background: rgba(255,107,26,0.08); }
+  table.offsets tr.t0 td { opacity: 0.75; }
+  .tcell { font-weight: 700; font-size: 13px; color: var(--accent); letter-spacing: 0.1em; }
+  .tcell.done { color: var(--good); }
+  .tcell.t0 { color: var(--dim); }
+  .tcell.flagged { color: var(--bad); }
+  .coord { color: var(--text); }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border); margin-right: 6px;
+  }
+  .status-dot.pending { background: var(--dim); }
+  .status-dot.active { background: var(--accent); animation: pulse 1.2s infinite; }
+  .status-dot.done { background: var(--good); }
+  .status-dot.flagged { background: var(--bad); }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* LOG */
+  .log-panel {
+    border: 1px solid var(--border); background: var(--panel);
+    padding: 8px 10px; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; max-height: 140px; overflow-y: auto; line-height: 1.45;
+  }
+  .log-panel .line { white-space: pre-wrap; word-break: break-all; }
+  .log-panel .tx { color: var(--accent); }
+  .log-panel .rx { color: var(--good); }
+  .log-panel .sys { color: var(--dim); }
+  .log-panel .err { color: var(--bad); }
+  .log-panel .ts { color: #444; margin-right: 5px; }
+
+  details summary {
+    cursor: pointer; color: var(--dim); font-size: 10px;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  details summary::-webkit-details-marker { color: var(--accent); }
+
+  .help-text {
+    font-size: 10px; color: var(--dim);
+    font-family: 'JetBrains Mono', monospace; line-height: 1.55;
+  }
+
+  .rot-picker {
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 3px;
+  }
+  .rot-picker button {
+    padding: 8px 2px;
+    font-size: 11px;
+    text-align: center;
+  }
+  .rot-picker button.active {
+    background: var(--accent); color: #000;
+    border-color: var(--accent); font-weight: 700;
+  }
+
+  /* Flip toggle buttons: standalone toggles for X/Y flip */
+  .flip-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 6px; }
+  .flip-toggles button {
+    padding: 6px 2px; font-size: 10px; text-align: center;
+  }
+  .flip-toggles button.active {
+    background: var(--accent); color: #000;
+    border-color: var(--accent); font-weight: 700;
+  }
+
+  /* Orientation test diagram: clickable 4-edge prompt */
+  .orient-diagram-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 6px 0;
+  }
+  .orient-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--dim);
+  }
+  .orient-diagram {
+    position: relative;
+    width: 220px; height: 160px;
+    display: grid;
+    grid-template-columns: 60px 1fr 60px;
+    grid-template-rows: 36px 1fr 36px;
+    gap: 4px;
+  }
+  .orient-edge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 700;
+    padding: 4px 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    text-align: center;
+  }
+  .orient-edge:hover {
+    background: var(--accent); color: #000; border-color: var(--accent);
+  }
+  .orient-top    { grid-column: 2; grid-row: 1; }
+  .orient-right  { grid-column: 3; grid-row: 2; writing-mode: vertical-rl; }
+  .orient-bottom { grid-column: 2; grid-row: 3; }
+  .orient-left   { grid-column: 1; grid-row: 2; writing-mode: vertical-rl; transform: rotate(180deg); }
+  .orient-center {
+    grid-column: 2; grid-row: 2;
+    display: flex; align-items: center; justify-content: center;
+    background: #000;
+    border: 1px dashed var(--border);
+    color: var(--dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; text-align: center;
+    line-height: 1.2;
+  }
+
+  /* STAGE A SETUP CARD — centered, covers the work area */
+  .setup-card {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 24px;
+    min-height: 0;
+  }
+  .work.stage-connect .setup-card { display: flex; }
+  .work.stage-connect .work-main { display: none; }
+  .setup-card-inner {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 36px 40px;
+    max-width: 560px;
+    width: 100%;
+  }
+  .setup-card-inner h2 {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    font-size: 16px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .setup-card-inner .subtitle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--dim);
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+  .setup-steps {
+    display: flex; flex-direction: column; gap: 14px;
+    text-align: left;
+  }
+  .setup-step {
+    display: grid;
+    grid-template-columns: 32px 1fr auto;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+  }
+  .setup-step.done { border-color: var(--good); }
+  .setup-step .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  .setup-step.done .num {
+    border-color: var(--good); color: var(--good);
+  }
+  .setup-step.done .num::after { content: '✓'; }
+  .setup-step.done .num-text { display: none; }
+
+  /* Full setup step with inline controls */
+  .setup-step-full {
+    display: flex !important;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px 20px;
+  }
+  .setup-step-full .step-header {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 14px;
+    align-items: center;
+  }
+  .setup-step-full .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+  .setup-step-full .sublabel {
+    font-size: 10px; color: var(--dim);
+    margin-top: 2px;
+  }
+  .setup-step-full.done .sublabel { color: var(--good); }
+  .setup-step-full .step-controls {
+    display: flex; flex-direction: column; gap: 6px;
+    padding-left: 46px;
+  }
+  .setup-step .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .setup-step .sublabel {
+    font-size: 10px; color: var(--dim);
+    margin-top: 2px;
+  }
+  .setup-step .status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+  }
+  .setup-step.done .status { color: var(--good); }
+
+  /* Hide main work content during Stage A — keep layout and keep video
+     rendering (so videoWidth/Height populate) but invisible to user.
+     Using opacity/pointer-events rather than display:none, which would
+     unmount the video and block metadata load. */
+  .work-main {
+    display: flex; flex-direction: column; gap: 12px;
+    flex: 1; min-height: 0;
+  }
+  .work.stage-connect .work-main {
+    visibility: hidden;
+    pointer-events: none;
+    /* height collapsed so setup-card can own the visible space */
+    position: absolute;
+    inset: 14px;
+    z-index: -1;
+  }
+  .work.stage-connect .setup-card {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Sidebar: hide during Stage A */
+  main.stage-connect {
+    grid-template-columns: 1fr;
+  }
+  main.stage-connect .sidebar {
+    display: none;
+  }
+
+  /* Hide reticle overlays before Stage E */
+  .zoom-stage.reticle-hidden .reticle-layer { display: none; }
+
+  /* Disable reticle sliders outside Stage E */
+  .reticle-sliders.locked input[type="range"] {
+    pointer-events: none; opacity: 0.35;
+  }
+  .reticle-sliders .lock-note {
+    display: none;
+    font-size: 9.5px; color: var(--warn);
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .reticle-sliders.locked .lock-note { display: block; }
+
+  /* BUSY OVERLAY — scoped to the wizard-prompt bar only */
+  .busy-overlay {
+    position: absolute; inset: 0;
+    background: rgba(20, 22, 26, 0.92);
+    display: none; align-items: center; justify-content: center;
+    z-index: 10;
+    backdrop-filter: blur(1px);
+  }
+  .busy-overlay.visible { display: flex; }
+  .busy-card {
+    display: flex; align-items: center; gap: 14px;
+    padding: 2px 8px;
+  }
+  .busy-card .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .busy-card .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .busy-card .detail {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+  }
+  .busy-card .cmd {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text);
+    padding: 2px 6px;
+    background: #000;
+    border: 1px solid var(--border);
+  }
+
+  /* Make wizard-prompt the positioning parent for the busy overlay */
+  .wizard-prompt { position: relative; }
+
+  /* WIZARD PROMPT PANEL — sticky instruction strip */
+  .wizard-prompt {
+    background: linear-gradient(135deg, rgba(255,107,26,0.12), rgba(255,107,26,0.03));
+    border: 1px solid var(--accent);
+    padding: 8px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.5;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .wizard-prompt .title {
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .wizard-prompt .body {
+    color: var(--text);
+    line-height: 1.45;
+  }
+  .wizard-prompt .body b { color: var(--accent); }
+  .wizard-prompt .actions {
+    display: flex; gap: 6px;
+    justify-content: flex-end;
+  }
+  .wizard-prompt .actions button {
+    width: auto; white-space: nowrap;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  .wizard-prompt.good {
+    border-color: var(--good);
+    background: linear-gradient(135deg, rgba(74,222,128,0.12), rgba(74,222,128,0.03));
+  }
+  .wizard-prompt.good .title { color: var(--good); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>XL OFFSET <span>/</span> VISION CALIBRATOR</h1>
+  <div>
+    <span id="camPill" class="pill">CAM OFF</span>
+    <span id="printerPill" class="pill">PRINTER OFF</span>
+  </div>
+</header>
+
+<main>
+  <aside class="sidebar">
+    <div class="section">
+      <div class="section-label">Workflow</div>
+      <div class="stages" id="stagesPanel">
+        <div class="stage-li" data-stage="connect"><span class="num">A</span><span>Connect camera + printer</span></div>
+        <div class="stage-li" data-stage="buildplate"><span class="num">B</span><span>Confirm build plate</span></div>
+        <div class="stage-li" data-stage="home"><span class="num">C</span><span>Autohome + park</span></div>
+        <div class="stage-li" data-stage="rotateTest"><span class="num">D</span><span>Rotation test</span></div>
+        <div class="stage-li" data-stage="positionT0"><span class="num">E</span><span>Position T0 + focus</span></div>
+        <div class="stage-li" data-stage="reticle"><span class="num">F</span><span>Place reticle on T0</span></div>
+        <div class="stage-li" data-stage="toolloop"><span class="num">G</span><span>Calibrate each tool</span></div>
+        <div class="stage-li" data-stage="revalidate"><span class="num">H</span><span>Revalidate all</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Zoom</div>
+      <div class="field">
+        <label>Zoom window <span id="zoomSizeLabel" class="mono" style="float:right; color:var(--accent);">200</span></label>
+        <input type="range" id="zoomSize" min="40" max="600" step="10" value="200" />
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Reticle</div>
+      <div class="reticle-sliders" id="reticleSliders">
+        <div class="field">
+          <label>Hole circle <span id="innerSizeLabel" class="mono" style="float:right; color:var(--accent);">40</span></label>
+          <input type="range" id="innerSize" min="4" max="300" step="2" value="40" />
+        </div>
+        <div class="field">
+          <label>Nozzle outer radius <span id="outerSizeLabel" class="mono" style="float:right; color:var(--accent);">120</span></label>
+          <input type="range" id="outerSize" min="8" max="500" step="2" value="120" />
+        </div>
+        <div class="lock-note">🔒 Locked — reticle set in Stage F</div>
+      </div>
+      <div class="help-text" id="reticleHint" style="margin-top:8px;">
+        Hole circle + nozzle outer: adjustable in Stage F (reticle placement).
+      </div>
+    </div>
+
+    <div class="section">
+      <details>
+        <summary>Manual G-code</summary>
+        <div style="margin-top:8px; display:flex; gap:4px;">
+          <input type="text" id="manualGcode" placeholder="G1 X50 Y50 F3000" />
+          <button id="btnSendManual" style="max-width:70px;">Send</button>
+        </div>
+      </details>
+    </div>
+  </aside>
+
+  <div class="work stage-connect" id="workArea">
+    <!-- Setup card: shown only during Stage A -->
+    <div class="setup-card" id="setupCard">
+      <div class="setup-card-inner">
+        <h2 style="text-align:center;">Get Started</h2>
+        <div class="subtitle" style="text-align:center;">Connect the camera and printer to begin.</div>
+        <div class="setup-steps">
+
+          <div class="setup-step setup-step-full" id="setupStepCam">
+            <div class="step-header">
+              <div class="num"><span class="num-text">1</span></div>
+              <div>
+                <div class="label">Camera</div>
+                <div class="sublabel" id="setupStatusCam">Not started</div>
+              </div>
+            </div>
+            <div class="step-controls">
+              <select id="camSelect"><option>— scanning —</option></select>
+              <select id="camResolution">
+                <option value="1280x720">1280 × 720</option>
+                <option value="1920x1080" selected>1920 × 1080</option>
+                <option value="2560x1440">2560 × 1440</option>
+                <option value="3840x2160">3840 × 2160 (4K)</option>
+              </select>
+              <div class="btn-row" id="camBtnsIdle">
+                <button id="btnRefreshCams">Refresh</button>
+                <button id="btnStartCam" class="primary">Start camera</button>
+              </div>
+              <button id="btnStopCam" class="danger" style="display:none;">Stop camera</button>
+            </div>
+          </div>
+
+          <div class="setup-step setup-step-full" id="setupStepPrinter">
+            <div class="step-header">
+              <div class="num"><span class="num-text">2</span></div>
+              <div>
+                <div class="label">Printer</div>
+                <div class="sublabel" id="setupStatusPrinter">Not connected</div>
+              </div>
+            </div>
+            <div class="step-controls">
+              <select id="transportMode">
+                <option value="serial" selected>Web Serial (USB)</option>
+                <option value="mock">Mock (no hardware)</option>
+              </select>
+              <div class="field" id="baudField" style="margin:0;">
+                <select id="baudRate">
+                  <option value="115200" selected>115200</option>
+                  <option value="250000">250000</option>
+                </select>
+              </div>
+              <button id="btnConnect" class="primary">Connect printer</button>
+              <button id="btnDisconnect" class="danger" style="display:none;">Disconnect</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Main work content (hidden during Stage A) -->
+    <div class="work-main" id="workMain">
+      <!-- Wizard prompt panel -->
+      <div class="wizard-prompt" id="wizardPrompt">
+        <div class="title" id="wizardTitle">Getting started</div>
+        <div class="body" id="wizardBody">Start camera and connect printer to begin.</div>
+        <div class="actions" id="wizardActions"></div>
+        <!-- Busy overlay sits inside wizard-prompt, covers it only -->
+        <div class="busy-overlay" id="busyOverlay">
+          <div class="busy-card">
+            <div class="spinner"></div>
+            <div>
+              <span class="label" id="busyLabel">Working…</span>
+              <span class="detail" id="busyDetail">Waiting for printer</span>
+            </div>
+            <span class="cmd" id="busyCmd" style="display:none;"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-row">
+        <div class="minimap">
+          <div class="stage-title"><span>Live Minimap</span><span class="hint" id="liveHint">drag/click</span></div>
+          <div class="minimap-stage" id="liveStage">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="liveOverlay"></canvas>
+            <div class="stage-hud">
+              <span class="tag" id="hudCam">—</span>
+              <span class="tag" id="hudFps">0 FPS</span>
+            </div>
+          </div>
+
+          <div class="jog-block" style="margin-top:8px;">
+            <div class="jog-header">
+              <div class="jog-header-top">
+                <div class="jog-header-tool">
+                  <span class="jog-header-label">TOOL</span>
+                  <span class="jog-header-value" id="jogHeaderTool">—</span>
+                </div>
+              </div>
+              <div class="pos-rows" id="posRows">
+                <span class="row-label t0">T0 REF</span>
+                <span class="row-val" id="posRefXY">— / —</span>
+                <button id="btnRefreshPos" class="pos-refresh" title="Re-read M114">↻</button>
+                <span class="row-label tx" id="posTxLabel">T—</span>
+                <span class="row-val" id="posCurXY">— / —</span>
+              </div>
+            </div>
+
+            <div class="axis-label">X / Y · size = step (hover for value)</div>
+            <table class="jogpad-table" id="jogPadTable">
+              <tbody id="jogPadBody">
+                <!-- populated by renderJogPad() —
+                     14 rows total (7 +Y above, 7 −Y below), each row is a tr.
+                     The middle row uses colspan/rowspan for the X+/X- inline. -->
+              </tbody>
+            </table>
+            <div class="jog-pending" id="jogPending"></div>
+
+            <div style="margin-top:14px;">
+              <div class="axis-label">Z · size = step (hover for value)</div>
+              <table class="zjog-table" id="zJogTable">
+                <tbody id="zJogBody"></tbody>
+              </table>
+              <div class="help-text" style="margin-top:6px; text-align:center;" id="zHint">
+                Z only active during camera focus step.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="zoom-col">
+          <div class="stage-title">
+            <span>Zoom View — Align crosshair to nozzle hole</span>
+            <span class="hint" id="zoomHint">drag the circles</span>
+          </div>
+          <div class="zoom-col-inner">
+            <div class="zoom-stage reticle-hidden" id="zoomStage">
+              <canvas id="zoomCanvas"></canvas>
+              <canvas id="zoomOverlay" class="reticle-layer"></canvas>
+              <div class="stage-hud">
+                <span class="tag" id="hudTool">TOOL —</span>
+                <span class="tag green reticle-layer" id="hudReticle">RETICLE —</span>
+                <span class="tag locked" id="hudLocked" style="display:none;">LOCKED</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="offsets-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;">
+          <span class="section-label" style="margin:0; padding:0; border:0;">Tool offsets</span>
+          <button id="btnRestoreOriginal" class="danger" style="padding:4px 10px; font-size:10px;" disabled>
+            ↺ Restore original offsets
+          </button>
+        </div>
+        <table class="offsets" id="offsetsTable"></table>
+      </div>
+
+      <div>
+        <details>
+          <summary>Log</summary>
+          <div class="log-panel" id="log" style="margin-top:6px;"></div>
+        </details>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  camActive: false, stream: null, videoW: 0, videoH: 0,
+  transport: 'serial', serialPort: null, serialWriter: null, serialReader: null,
+  printerConnected: false,  // true only after user clicks Connect
+  homed: false,             // true after G28 completes
+
+  // Camera display orientation. Pure visual — NEVER affects jog commands
+  // or offset math (those use printer coords via M114).
+  //
+  // Defaults to identity; the orientation test (Stage D) auto-detects
+  // the correct rotation/flip from observed test moves. User can also
+  // override manually via sidebar.
+  camDisplay: { rotation: 0, flipX: false, flipY: false },
+
+  zoom: { cx: 640, cy: 360, size: 200 },
+  reticleRel: { dx: 0, dy: 0 },
+  reticle: { x: 640, y: 360, inner: 40, outer: 120 },
+  reticleLocked: false,
+
+  t0Ref: null,       // { x, y } pixel
+  t0RefXY: null,     // { x, y } printer (from M114)
+
+  tools: {},         // { idx: { current, saved, status } }
+  numTools: 2,
+  currentTool: 0,
+
+  jogAccumMm: { x: 0, y: 0 },
+  pendingJog: { x: 0, y: 0, z: 0 },
+  jogBusy: false,
+
+  stepMmXY: 0.1,
+  stepMmZ: 0.1,
+  overshootMm: 20,
+  // CoreXY motor-exercise: make Y overshoot different from X so both motors
+  // (A=X+Y, B=X−Y) get unequal step counts during approach. Final return
+  // move lands exactly on target — asymmetry is in the overshoot leg only.
+  overshootYMm: 16,
+  feedrateFast: 3000,
+  feedrateFine: 1500,
+  feedrateZ: 600,
+  jogDebounceMs: 300,
+
+  stage: 'connect',
+  zJogEnabled: false,  // only true during Stage D
+  flaggedTools: [],
+  // Snapshotted at first offset read after Connect. Never mutated during session.
+  // Used by "Restore original offsets" button.
+  originalOffsets: null,
+
+  frameCount: 0,
+  fpsLast: performance.now(),
+};
+
+const JOG_STEPS = [10, 5, 1, 0.5, 0.1, 0.05, 0.01];
+
+// ============================================================
+// DOM helpers
+// ============================================================
+const $ = id => document.getElementById(id);
+const video = $('video');
+const liveStage = $('liveStage');
+const liveOverlay = $('liveOverlay');
+const zoomStage = $('zoomStage');
+const zoomCanvas = $('zoomCanvas');
+const zoomOverlay = $('zoomOverlay');
+
+function log(msg, kind='sys') {
+  const el = $('log');
+  if (!el) return;
+  const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  const line = document.createElement('div');
+  line.className = 'line ' + kind;
+  line.innerHTML = `<span class="ts">${ts}</span>${msg.replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+// Standard move-completion sync: wait for queue to drain, then read
+// position. Call after every G28 / G1 so the UI's notion of "where we
+// are" matches the printer's. M400 blocks until the planner is empty,
+// and M114 returns the settled coordinates (also auto-updates the
+// header via the sendGcode hook).
+async function waitAndSyncPos() {
+  await sendGcode('M400');
+  await sendGcode('M114');
+}
+
+// ============================================================
+// CAMERA DISPLAY — rotation/flip is VISUAL ONLY, via CSS transform.
+// Jog is always pure printer-axis (X+ button = G1 X+). Offset math
+// uses M114 printer coords. The rotation never enters command math.
+// See applyCameraDisplay() below for the CSS transform logic.
+
+function setCurrentToolUI(idx) {
+  const label = (idx === null || idx === undefined) ? '—' : `T${idx}`;
+  $('hudTool').textContent = `TOOL ${label}`;
+  $('jogHeaderTool').textContent = label;
+  $('posTxLabel').textContent = (idx === null || idx === undefined) ? 'T—' : `T${idx}`;
+  state.currentTool = idx;
+}
+
+// Update the live position display (T0 ref + current tool).
+// Called automatically every time an M114 response comes back for current tool.
+function setPosDisplay(x, y, z) {
+  if (x !== null && x !== undefined && y !== null && y !== undefined) {
+    $('posCurXY').textContent = `X ${x.toFixed(3)} Y ${y.toFixed(3)}`;
+    $('posCurXY').classList.remove('stale');
+  }
+  // z ignored for new display (not shown) — keep param for backward compat
+}
+
+function updatePosRefDisplay() {
+  if (state.t0RefXY) {
+    $('posRefXY').textContent = `X ${state.t0RefXY.x.toFixed(3)} Y ${state.t0RefXY.y.toFixed(3)}`;
+  } else {
+    $('posRefXY').textContent = '— / —';
+  }
+}
+
+// Mark position display as potentially-stale (e.g., after a move we
+// haven't re-queried yet). Display dims until next M114.
+function markPosStale() {
+  $('posCurXY').classList.add('stale');
+}
+
+// Parse an M114 response and update the header. Also returns the
+// parsed values for callers that want them directly.
+function parseAndDisplayM114(lines) {
+  const joined = (lines || []).join(' ');
+  const xm = /X:\s*(-?\d+(?:\.\d+)?)/i.exec(joined);
+  const ym = /Y:\s*(-?\d+(?:\.\d+)?)/i.exec(joined);
+  const zm = /Z:\s*(-?\d+(?:\.\d+)?)/i.exec(joined);
+  const x = xm ? parseFloat(xm[1]) : null;
+  const y = ym ? parseFloat(ym[1]) : null;
+  const z = zm ? parseFloat(zm[1]) : null;
+  setPosDisplay(x, y, z);
+  return { x, y, z };
+}
+
+// ============================================================
+// STAGE INDICATOR + WIZARD PROMPT
+// ============================================================
+const STAGES = ['connect', 'buildplate', 'home', 'rotateTest', 'positionT0', 'reticle', 'toolloop', 'revalidate'];
+
+function setStage(s) {
+  state.stage = s;
+  const idx = STAGES.indexOf(s);
+  document.querySelectorAll('.stage-li').forEach(el => {
+    const eIdx = STAGES.indexOf(el.dataset.stage);
+    el.classList.remove('current', 'done');
+    if (eIdx < idx) el.classList.add('done');
+    else if (eIdx === idx) el.classList.add('current');
+  });
+
+  // Work area: show setup card in Stage A, main content from Stage B onward
+  const work = $('workArea');
+  const mainEl = document.querySelector('main');
+  if (s === 'connect') {
+    work.classList.add('stage-connect');
+    mainEl.classList.add('stage-connect');
+  } else {
+    work.classList.remove('stage-connect');
+    mainEl.classList.remove('stage-connect');
+  }
+
+  // Reticle overlay: hidden until Stage E
+  const zs = $('zoomStage');
+  const reticleVisible = (s === 'reticle' || s === 'toolloop' || s === 'revalidate');
+  if (reticleVisible) zs.classList.remove('reticle-hidden');
+  else                zs.classList.add('reticle-hidden');
+
+  // Reticle sliders: enabled ONLY in Stage E (locks after).
+  // Before E: locked because reticle not placed yet. After E: locked for consistency.
+  const sliders = $('reticleSliders');
+  if (s === 'reticle') sliders.classList.remove('locked');
+  else                 sliders.classList.add('locked');
+
+  updateZLockState();
+  updateJogEnabled();
+  updateReticleLockedUI();
+}
+
+function updateZLockState() {
+  // Z jog enabled only during Stage E (positionT0 — camera focus step)
+  state.zJogEnabled = (state.stage === 'positionT0') && state.homed;
+  document.querySelectorAll('#zJogTable button[data-zstep]').forEach(b => {
+    b.disabled = !state.zJogEnabled;
+  });
+  $('zHint').textContent = state.zJogEnabled
+    ? 'Adjust Z to focus camera, X/Y to center nozzle.'
+    : !state.homed
+      ? 'Jog disabled — printer must be homed first.'
+      : 'Z only active during camera focus step.';
+}
+
+function updateJogEnabled() {
+  // XY jog buttons enabled only after homing
+  const xyEnabled = state.homed && state.printerConnected;
+  document.querySelectorAll('#jogPadTable button[data-jogstep]').forEach(b => {
+    b.disabled = !xyEnabled;
+  });
+  // Z lock state also depends on homed
+  updateZLockState();
+  // Re-render offsets table so Pick buttons reflect connected/homed state
+  if (typeof renderOffsetsTable === 'function') renderOffsetsTable();
+}
+
+function updateReticleLockedUI() {
+  if (state.reticleLocked) {
+    liveStage.classList.add('locked');
+    zoomStage.classList.add('locked');
+    $('hudLocked').style.display = '';
+  } else {
+    liveStage.classList.remove('locked');
+    zoomStage.classList.remove('locked');
+    $('hudLocked').style.display = 'none';
+  }
+}
+
+function wizard(title, bodyHtml, actions) {
+  $('wizardPrompt').classList.remove('good');
+  $('wizardTitle').textContent = title;
+  $('wizardBody').innerHTML = bodyHtml;
+  const act = $('wizardActions');
+  act.innerHTML = '';
+  (actions || []).forEach(a => {
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    if (a.kind === 'primary') b.classList.add('primary');
+    if (a.kind === 'good') b.classList.add('good');
+    if (a.kind === 'danger') b.classList.add('danger');
+    if (a.disabled) b.disabled = true;
+    b.onclick = a.onclick;
+    act.appendChild(b);
+  });
+}
+
+// ============================================================
+// CAMERA
+// ============================================================
+async function listCameras() {
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+    tmp.getTracks().forEach(t => t.stop());
+  } catch(e) { log('Camera permission denied: ' + e.message, 'err'); return; }
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  const cams = devs.filter(d => d.kind === 'videoinput');
+  const sel = $('camSelect');
+  sel.innerHTML = '';
+  cams.forEach((c, i) => {
+    const o = document.createElement('option');
+    o.value = c.deviceId;
+    o.textContent = c.label || `Camera ${i+1}`;
+    sel.appendChild(o);
+  });
+  log(`Found ${cams.length} camera(s)`, 'sys');
+}
+
+async function startCamera() {
+  const deviceId = $('camSelect').value;
+  if (!deviceId) { log('No camera selected', 'err'); return; }
+  const [reqW, reqH] = ($('camResolution').value || '1920x1080').split('x').map(Number);
+  try {
+    if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+    state.stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId }, width: { ideal: reqW }, height: { ideal: reqH } }
+    });
+    video.srcObject = state.stream;
+    await video.play();
+
+    // Ensure metadata (videoWidth/Height) is available before we proceed.
+    // In some browsers, when the video is inside a hidden parent, metadata
+    // can lag. Wait up to 3 seconds.
+    if (!video.videoWidth) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 3000);
+        video.addEventListener('loadedmetadata', () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+    }
+
+    state.camActive = true;
+    state.videoW = video.videoWidth || reqW;
+    state.videoH = video.videoHeight || reqH;
+    state.zoom.cx = Math.floor(state.videoW / 2);
+    state.zoom.cy = Math.floor(state.videoH / 2);
+    state.reticleRel = { dx: 0, dy: 0 };
+    $('camPill').textContent = `CAM ${state.videoW}×${state.videoH}`;
+    $('camPill').classList.add('on');
+    $('hudCam').textContent = `${state.videoW}×${state.videoH}`;
+    $('camBtnsIdle').style.display = 'none';
+    $('btnStopCam').style.display = '';
+    $('camSelect').disabled = true;
+    $('camResolution').disabled = true;
+    log(`Camera started: ${state.videoW}×${state.videoH}`, 'sys');
+    renderLoop();
+    maybeAdvanceFromConnect();
+  } catch(e) { log('Camera start failed: ' + e.message, 'err'); }
+}
+
+function stopCamera() {
+  if (state.stream) {
+    state.stream.getTracks().forEach(t => t.stop());
+    state.stream = null;
+  }
+  video.srcObject = null;
+  state.camActive = false;
+  $('camPill').textContent = 'CAM OFF';
+  $('camPill').classList.remove('on');
+  $('hudCam').textContent = '—';
+  $('camBtnsIdle').style.display = '';
+  $('btnStopCam').style.display = 'none';
+  $('camSelect').disabled = false;
+  $('camResolution').disabled = false;
+  log('Camera stopped', 'sys');
+  maybeAdvanceFromConnect();
+}
+
+// ============================================================
+// CAMERA ROTATION HELPERS
+// ============================================================
+// "Raw" = native video pixel coords (videoW × videoH).
+// "Canonical" = user-facing coords after rotation + flip.
+// For 90°/270° rotations, canonical width/height are swapped.
+// ============================================================
+// CAMERA DISPLAY TRANSFORM
+// ============================================================
+//
+// Rotation + flip are APPLIED VISUALLY VIA CSS only. State coords
+// (zoom.cx/cy, reticle, t0Ref) are always in raw video pixel space.
+//
+// To render: apply CSS transform to the video + overlay canvases.
+// To hit-test: take a pointer event, inverse-transform to raw pixel.
+
+function transformCssString() {
+  const { rotation, flipX, flipY } = state.camDisplay;
+  const sx = flipX ? -1 : 1;
+  const sy = flipY ? -1 : 1;
+  // Order matters: CSS applies right-to-left, so scale happens BEFORE
+  // rotate when written as "rotate() scale()". We want flip to be
+  // applied first (mirror the raw frame), then rotate.
+  return `rotate(${rotation}deg) scale(${sx}, ${sy})`;
+}
+
+function applyCameraDisplay() {
+  const css = transformCssString();
+  // Apply to all overlay canvases and the video-drawing canvas.
+  // The raw <video> element is display:none — we draw it via canvas.
+  const targets = [
+    document.getElementById('liveOverlay'),
+    document.getElementById('zoomCanvas'),
+    document.getElementById('zoomOverlay'),
+  ];
+  for (const el of targets) {
+    if (el) el.style.transform = css;
+  }
+  // Update sidebar controls
+  document.querySelectorAll('#rotPicker button').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.rot, 10) === state.camDisplay.rotation);
+  });
+  const fx = document.getElementById('flipXToggle');
+  const fy = document.getElementById('flipYToggle');
+  if (fx) fx.classList.toggle('active', state.camDisplay.flipX);
+  if (fy) fy.classList.toggle('active', state.camDisplay.flipY);
+}
+
+// Invert the CSS transform to map a point in DISPLAY space (what the
+// user sees after rotate+flip) back to raw video pixel coords.
+// Input: (cssX, cssY) in the range 0..displayW × 0..displayH
+// Output: (rawX, rawY) in the range 0..videoW × 0..videoH
+function displayToRaw(cssX, cssY, displayW, displayH) {
+  const { rotation, flipX, flipY } = state.camDisplay;
+  const Vw = state.videoW, Vh = state.videoH;
+
+  // The displayW/H refers to the displayed size of the TRANSFORMED video.
+  // Since CSS transforms don't affect layout box, we treat the displayed
+  // area as if it holds the transformed video inscribed.
+
+  // Step 1: center coordinates (display box)
+  let x = cssX - displayW / 2;
+  let y = cssY - displayH / 2;
+
+  // Step 2: inverse rotate (rotate by -rotation, but since we're going
+  // display→raw, we rotate by +rotation then invert, OR equivalently
+  // rotate by -rotation directly).
+  const rad = -rotation * Math.PI / 180;  // inverse
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const rx = x * cos - y * sin;
+  const ry = x * sin + y * cos;
+
+  // After inverse rotation, the display box becomes un-rotated but may
+  // have effective dimensions swapped (for 90/270).
+  const rawBoxW = (rotation === 90 || rotation === 270) ? displayH : displayW;
+  const rawBoxH = (rotation === 90 || rotation === 270) ? displayW : displayH;
+
+  // Step 3: inverse flip (flip is its own inverse)
+  let fx = flipX ? -rx : rx;
+  let fy = flipY ? -ry : ry;
+
+  // Step 4: translate back to top-left origin, scale to raw video dims
+  const px = (fx + rawBoxW / 2) / rawBoxW * Vw;
+  const py = (fy + rawBoxH / 2) / rawBoxH * Vh;
+  return { x: px, y: py };
+}
+
+// User's canonical jog delta (e.g. "+0.1mm in screen-X") → printer-axis
+// delta to send in M218 / absolute G1.
+function uiDeltaToPrinterDelta(cx, cy) {
+  // Jog is pure printer-axis. Camera rotation / flip are purely visual
+  // and must NOT affect printer coordinate commands. X+ button sends
+  // G1 X+ to the printer regardless of how the camera happens to be
+  // mounted or rotated.
+  return { x: cx, y: cy };
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function renderLoop() {
+  if (!state.camActive) return;
+
+  // All state coords are in raw video pixel space
+  state.reticle.x = state.zoom.cx + state.reticleRel.dx;
+  state.reticle.y = state.zoom.cy + state.reticleRel.dy;
+
+  const Vw = state.videoW, Vh = state.videoH;
+
+  // Live overlay — full raw-video sized canvas. CSS rotates it for display.
+  liveOverlay.width = Vw;
+  liveOverlay.height = Vh;
+  drawLiveOverlay();
+
+  // Zoom canvas — crop a rect of raw video. CSS rotates this canvas too,
+  // so the cropped content appears in the display orientation.
+  const zs = state.zoom.size;
+  const zx = Math.max(0, Math.min(Vw - zs, state.zoom.cx - zs/2));
+  const zy = Math.max(0, Math.min(Vh - zs, state.zoom.cy - zs/2));
+
+  zoomCanvas.width = zs; zoomCanvas.height = zs;
+  zoomOverlay.width = zs; zoomOverlay.height = zs;
+
+  const zctx = zoomCanvas.getContext('2d');
+  zctx.imageSmoothingEnabled = false;
+  zctx.clearRect(0, 0, zs, zs);
+  // Crop raw video: source rect (zx, zy, zs, zs) → dest (0, 0, zs, zs)
+  zctx.drawImage(video, zx, zy, zs, zs, 0, 0, zs, zs);
+
+  drawZoomOverlay(zx, zy, zs);
+
+  updateFps();
+  requestAnimationFrame(renderLoop);
+}
+
+function drawLiveOverlay() {
+  const ctx = liveOverlay.getContext('2d');
+  const Vw = state.videoW, Vh = state.videoH;
+  ctx.clearRect(0, 0, Vw, Vh);
+
+  // Draw raw video into the canvas (1:1 pixel mapping)
+  ctx.drawImage(video, 0, 0, Vw, Vh);
+
+  // Draw zoom rect and reticle dot in raw pixel coords
+  const zs = state.zoom.size;
+  const zx = Math.max(0, Math.min(Vw - zs, state.zoom.cx - zs/2));
+  const zy = Math.max(0, Math.min(Vh - zs, state.zoom.cy - zs/2));
+  ctx.strokeStyle = '#ff6b1a';
+  ctx.lineWidth = Math.max(2, Vw / 600);
+  ctx.strokeRect(zx, zy, zs, zs);
+  ctx.fillStyle = '#4ade80';
+  ctx.beginPath();
+  ctx.arc(state.reticle.x, state.reticle.y, Math.max(3, Vw / 400), 0, Math.PI * 2);
+  ctx.fill();
+  if (state.t0Ref) {
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = Math.max(1, Vw / 800);
+    ctx.beginPath();
+    ctx.arc(state.t0Ref.x, state.t0Ref.y, Math.max(4, Vw / 300), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawZoomOverlay(zx, zy, zs) {
+  const ctx = zoomOverlay.getContext('2d');
+  ctx.clearRect(0, 0, zs, zs);
+  const rcx = state.reticle.x - zx;
+  const rcy = state.reticle.y - zy;
+  const innerR = state.reticle.inner / 2;
+  const outerR = state.reticle.outer / 2;
+
+  // Outer circle: fill with subtle green, stroke at 0.8 opacity
+  ctx.fillStyle = 'rgba(74,222,128,0.08)';
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, outerR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(74,222,128,0.85)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, outerR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Inner circle (hole): stronger fill + full opacity stroke
+  ctx.fillStyle = 'rgba(74,222,128,0.15)';
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, innerR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(74,222,128,1)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, innerR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Crosshair: full opacity
+  const armOut = Math.max(10, outerR + 14);
+  const armGap = Math.max(4, innerR * 0.2);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(74,222,128,0.9)';
+  ctx.beginPath();
+  ctx.moveTo(rcx - armOut, rcy); ctx.lineTo(rcx - armGap, rcy);
+  ctx.moveTo(rcx + armGap, rcy); ctx.lineTo(rcx + armOut, rcy);
+  ctx.moveTo(rcx, rcy - armOut); ctx.lineTo(rcx, rcy - armGap);
+  ctx.moveTo(rcx, rcy + armGap); ctx.lineTo(rcx, rcy + armOut);
+  ctx.stroke();
+
+  ctx.fillStyle = '#4ade80';
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  $('hudReticle').textContent = `RETICLE ${state.reticle.x.toFixed(1)},${state.reticle.y.toFixed(1)}`;
+}
+
+function updateFps() {
+  state.frameCount++;
+  const now = performance.now();
+  if (now - state.fpsLast > 500) {
+    const fps = state.frameCount / ((now - state.fpsLast) / 1000);
+    $('hudFps').textContent = `${fps.toFixed(0)} FPS`;
+    state.frameCount = 0;
+    state.fpsLast = now;
+  }
+}
+
+// ============================================================
+// BUSY OVERLAY
+// ============================================================
+function showBusy(label, detail, cmd) {
+  $('busyLabel').textContent = label || 'Working…';
+  $('busyDetail').textContent = detail || 'Waiting for printer response';
+  if (cmd) {
+    $('busyCmd').textContent = cmd;
+    $('busyCmd').style.display = '';
+  } else {
+    $('busyCmd').style.display = 'none';
+  }
+  $('busyOverlay').classList.add('visible');
+}
+function hideBusy() {
+  $('busyOverlay').classList.remove('visible');
+}
+
+async function withBusy(label, detail, cmd, fn) {
+  // Allow either (label, detail, fn) or (label, detail, cmd, fn).
+  if (typeof cmd === 'function' && fn === undefined) {
+    fn = cmd;
+    cmd = null;
+  }
+  showBusy(label, detail, cmd);
+  try { return await fn(); }
+  finally { hideBusy(); }
+}
+
+// Mock delay profiles — approximate real printer behavior so the
+// mock flow feels realistic and surfaces async bugs.
+function mockDelayFor(cmd) {
+  if (/^G28\b/i.test(cmd))        return 18000;  // homing
+  if (/^G29\b/i.test(cmd))        return 25000;  // mesh
+  if (/^G30\b/i.test(cmd))        return 4000;   // single Z probe
+  if (/^T\d/i.test(cmd))          return 3500;   // tool change
+  if (/^M500/i.test(cmd))         return 800;    // EEPROM save
+  if (/^M400/i.test(cmd))         return 400;    // wait for moves
+  if (/^G1\b.*Z/i.test(cmd))      return 1200;   // Z move (slow)
+  if (/^G1\b/i.test(cmd))         return 900;    // XY move
+  if (/^M114/i.test(cmd))         return 80;     // position query
+  if (/^M115/i.test(cmd))         return 120;    // firmware info
+  if (/^M218/i.test(cmd))         return 150;    // offset set/query
+  if (/^G90|^G91/i.test(cmd))     return 50;     // mode
+  return 150;
+}
+
+
+// Map pointer (clientX, clientY) on the live minimap stage → raw video
+// pixel coords. Accounts for object-fit:contain letterboxing + inverse
+// of the CSS transform applied to the overlay canvas.
+function liveToRawCoords(clientX, clientY) {
+  const rect = liveStage.getBoundingClientRect();
+  const Vw = state.videoW, Vh = state.videoH;
+
+  // The liveOverlay canvas fills its parent (liveStage) with
+  // object-fit: contain, so the displayed video has dimensions
+  // inscribed in the stage rect, preserving aspect.
+  //
+  // At rotation 0/180: displayed box is Vw × Vh (letterboxed).
+  // At rotation 90/270: effective aspect is swapped to Vh × Vw,
+  // so the inscribed box is scaled differently.
+  const rot = state.camDisplay.rotation;
+  const aspectW = (rot === 90 || rot === 270) ? Vh : Vw;
+  const aspectH = (rot === 90 || rot === 270) ? Vw : Vh;
+  const scale = Math.min(rect.width / aspectW, rect.height / aspectH);
+  const drawW = aspectW * scale;
+  const drawH = aspectH * scale;
+  const offX = (rect.width - drawW) / 2;
+  const offY = (rect.height - drawH) / 2;
+
+  // Pointer in displayed-box coords (origin at drawn top-left, 0..drawW × 0..drawH)
+  const dispX = clientX - rect.left - offX;
+  const dispY = clientY - rect.top - offY;
+
+  // Normalize to 0..1 inside displayed box
+  const nx = dispX / drawW;
+  const ny = dispY / drawH;
+
+  // Inverse flip + rotate to get position in raw video (0..1)
+  return invertDisplayNormToRaw(nx, ny);
+}
+
+// Map pointer on zoom stage → raw video pixel coords.
+// Zoom canvas is sized zs × zs (drawn from crop (zx..zx+zs, zy..zy+zs)).
+// Inverse-transform gives a position inside that crop.
+function zoomToRawCoords(clientX, clientY) {
+  const rect = zoomStage.getBoundingClientRect();
+  const zs = state.zoom.size;
+
+  // zoom canvas has object-fit:contain inside a square stage, so it
+  // always draws at the same aspect (1:1). No rotation-dependent aspect.
+  const scale = Math.min(rect.width / zs, rect.height / zs);
+  const drawW = zs * scale;
+  const drawH = zs * scale;
+  const offX = (rect.width - drawW) / 2;
+  const offY = (rect.height - drawH) / 2;
+
+  const dispX = clientX - rect.left - offX;
+  const dispY = clientY - rect.top - offY;
+
+  const nx = dispX / drawW;
+  const ny = dispY / drawH;
+
+  // Inverse flip + rotate to get position in crop (normalized 0..1)
+  const crop = invertDisplayNormRotSq(nx, ny);
+
+  // Map to raw video: crop origin in raw is at (zx, zy)
+  const zx = Math.max(0, Math.min(state.videoW - zs, state.zoom.cx - zs/2));
+  const zy = Math.max(0, Math.min(state.videoH - zs, state.zoom.cy - zs/2));
+  return { x: zx + crop.x * zs, y: zy + crop.y * zs };
+}
+
+// Given a normalized (0..1) point in the display box of a video-aspect
+// element, return the corresponding normalized (0..1) point in raw video.
+// Used by liveToRawCoords. Handles rotation (which may swap display
+// aspect) + flip (applied in raw frame before rotation).
+function invertDisplayNormToRaw(nx, ny) {
+  const { rotation, flipX, flipY } = state.camDisplay;
+
+  // Un-rotate: rotate display coords by -rotation around center (0.5, 0.5).
+  // At rotation 0: (nx, ny) stays.
+  // At rotation 90 CW: to un-rotate, rotate CCW by 90.
+  //   Point (nx, ny) in display → un-rotated point has x' = ny, y' = 1-nx
+  //   But ALSO aspect swaps: a rotation-90 display box is as wide as the
+  //   raw video's height. Normalizations stay 0..1 either way.
+  let ux, uy;
+  switch (rotation) {
+    case 0:   ux = nx;       uy = ny;       break;
+    case 90:  ux = ny;       uy = 1 - nx;   break;  // un-rotate 90°CCW
+    case 180: ux = 1 - nx;   uy = 1 - ny;   break;
+    case 270: ux = 1 - ny;   uy = nx;       break;  // un-rotate 270°CCW = 90°CW
+    default:  ux = nx;       uy = ny;
+  }
+
+  // Un-flip (flip is its own inverse)
+  const fx = flipX ? (1 - ux) : ux;
+  const fy = flipY ? (1 - uy) : uy;
+
+  // Multiply by raw video dims
+  return { x: fx * state.videoW, y: fy * state.videoH };
+}
+
+// Invert rotation+flip for a square (same-aspect) display region.
+// Returns normalized (0..1) coords within the pre-transform square.
+function invertDisplayNormRotSq(nx, ny) {
+  const { rotation, flipX, flipY } = state.camDisplay;
+  let ux, uy;
+  switch (rotation) {
+    case 0:   ux = nx;       uy = ny;       break;
+    case 90:  ux = ny;       uy = 1 - nx;   break;
+    case 180: ux = 1 - nx;   uy = 1 - ny;   break;
+    case 270: ux = 1 - ny;   uy = nx;       break;
+    default:  ux = nx;       uy = ny;
+  }
+  const fx = flipX ? (1 - ux) : ux;
+  const fy = flipY ? (1 - uy) : uy;
+  return { x: fx, y: fy };
+}
+
+let liveDrag = null, liveClickStart = null;
+liveStage.addEventListener('pointerdown', e => {
+  if (!state.camActive || state.reticleLocked) return;
+  liveStage.setPointerCapture(e.pointerId);
+  liveClickStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+  const v = liveToRawCoords(e.clientX, e.clientY);
+  liveDrag = { offsetX: v.x - state.zoom.cx, offsetY: v.y - state.zoom.cy };
+});
+liveStage.addEventListener('pointermove', e => {
+  if (!liveDrag || state.reticleLocked) return;
+  const v = liveToRawCoords(e.clientX, e.clientY);
+  const hz = state.zoom.size / 2;
+  state.zoom.cx = Math.max(hz, Math.min(state.videoW - hz, v.x - liveDrag.offsetX));
+  state.zoom.cy = Math.max(hz, Math.min(state.videoH - hz, v.y - liveDrag.offsetY));
+});
+liveStage.addEventListener('pointerup', e => {
+  if (liveClickStart && !state.reticleLocked) {
+    const dx = e.clientX - liveClickStart.x;
+    const dy = e.clientY - liveClickStart.y;
+    const dt = Date.now() - liveClickStart.t;
+    if (dt < 200 && Math.hypot(dx, dy) < 4) {
+      const v = liveToRawCoords(e.clientX, e.clientY);
+      const hz = state.zoom.size / 2;
+      state.zoom.cx = Math.max(hz, Math.min(state.videoW - hz, v.x));
+      state.zoom.cy = Math.max(hz, Math.min(state.videoH - hz, v.y));
+    }
+  }
+  liveDrag = null; liveClickStart = null;
+});
+liveStage.addEventListener('pointercancel', () => { liveDrag = null; liveClickStart = null; });
+
+let zoomDrag = null;
+zoomStage.addEventListener('pointerdown', e => {
+  if (!state.camActive || state.reticleLocked) return;
+  zoomStage.setPointerCapture(e.pointerId);
+  const c = zoomToRawCoords(e.clientX, e.clientY);
+  zoomDrag = {
+    startX: c.x, startY: c.y,
+    startRelX: state.reticleRel.dx, startRelY: state.reticleRel.dy
+  };
+});
+zoomStage.addEventListener('pointermove', e => {
+  if (!zoomDrag || state.reticleLocked) return;
+  const c = zoomToRawCoords(e.clientX, e.clientY);
+  state.reticleRel.dx = zoomDrag.startRelX + (c.x - zoomDrag.startX);
+  state.reticleRel.dy = zoomDrag.startRelY + (c.y - zoomDrag.startY);
+});
+zoomStage.addEventListener('pointerup', () => { zoomDrag = null; });
+zoomStage.addEventListener('pointercancel', () => { zoomDrag = null; });
+
+// Sliders
+$('zoomSize').oninput = e => { state.zoom.size = +e.target.value; $('zoomSizeLabel').textContent = state.zoom.size; };
+$('innerSize').oninput = e => { state.reticle.inner = +e.target.value; $('innerSizeLabel').textContent = state.reticle.inner; };
+$('outerSize').oninput = e => { state.reticle.outer = +e.target.value; $('outerSizeLabel').textContent = state.reticle.outer; };
+
+// ============================================================
+// TRANSPORT
+// ============================================================
+let serialRxBuffer = '';
+let pendingCommands = [];
+async function readSerialLoop() {
+  const dec = new TextDecoder();
+  try {
+    while (state.serialReader) {
+      const { value, done } = await state.serialReader.read();
+      if (done) break;
+      serialRxBuffer += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = serialRxBuffer.indexOf('\n')) >= 0) {
+        const line = serialRxBuffer.slice(0, nl).trim();
+        serialRxBuffer = serialRxBuffer.slice(nl + 1);
+        if (line) {
+          log(line, 'rx');
+          if (pendingCommands.length) {
+            const cur = pendingCommands[0];
+            if (/^ok\b/i.test(line)) { cur.res(cur.lines); pendingCommands.shift(); }
+            else if (/^(error|!!)/i.test(line)) { cur.rej(new Error(line)); pendingCommands.shift(); }
+            else cur.lines.push(line);
+          }
+        }
+      }
+    }
+  } catch(e) { log('serial read: ' + e.message, 'err'); }
+}
+
+// Mock state: virtual printer position. Updated by handleMockCommand.
+// Initialized lazily so homing resets it properly.
+function ensureMockState() {
+  if (!state._mockPos) state._mockPos = { x: 50, y: 50, z: 100 };
+  if (state._mockAbsolute === undefined) state._mockAbsolute = true;
+}
+
+function handleMockCommand(cmd) {
+  ensureMockState();
+  const pos = state._mockPos;
+  const lines = [];
+
+  // G90 / G91 — absolute / relative mode
+  if (/^G90\b/i.test(cmd)) { state._mockAbsolute = true; return { lines, ok: true }; }
+  if (/^G91\b/i.test(cmd)) { state._mockAbsolute = false; return { lines, ok: true }; }
+
+  // G28 — home. Supports per-axis: "G28", "G28 X", "G28 Y", "G28 Z",
+  // "G28 XY", "G28 XYZ" etc. With no axis args, homes all.
+  if (/^G28\b/i.test(cmd)) {
+    const hasX = /\bX\b/i.test(cmd);
+    const hasY = /\bY\b/i.test(cmd);
+    const hasZ = /\bZ\b/i.test(cmd);
+    const all = !hasX && !hasY && !hasZ;
+    if (all || hasX) pos.x = 0;
+    if (all || hasY) pos.y = 0;
+    if (all || hasZ) pos.z = 0;
+    return { lines, ok: true };
+  }
+
+  // G30 — single Z probe at current XY. Sets Z to trigger height (0 in mock).
+  // Unlike G28 Z, does NOT move to a safe-homing position first.
+  if (/^G30\b/i.test(cmd)) {
+    pos.z = 0;
+    return { lines, ok: true };
+  }
+
+  // G1 / G0 — move. Parse X/Y/Z (F ignored for state purposes).
+  if (/^G[01]\b/i.test(cmd)) {
+    const mx = /X\s*(-?\d+(?:\.\d+)?)/i.exec(cmd);
+    const my = /Y\s*(-?\d+(?:\.\d+)?)/i.exec(cmd);
+    const mz = /Z\s*(-?\d+(?:\.\d+)?)/i.exec(cmd);
+    if (state._mockAbsolute) {
+      if (mx) pos.x = parseFloat(mx[1]);
+      if (my) pos.y = parseFloat(my[1]);
+      if (mz) pos.z = parseFloat(mz[1]);
+    } else {
+      if (mx) pos.x += parseFloat(mx[1]);
+      if (my) pos.y += parseFloat(my[1]);
+      if (mz) pos.z += parseFloat(mz[1]);
+    }
+    return { lines, ok: true };
+  }
+
+  // T<n> — tool change. On a real XL this triggers a toolhead swap. For
+  // mock we just note the tool and keep the logical position the same.
+  if (/^T\d+/i.test(cmd)) {
+    return { lines, ok: true };
+  }
+
+  // M114 — report position. Format matches Marlin/Buddy: "X:.. Y:.. Z:.. E:..".
+  if (/^M114\b/i.test(cmd)) {
+    lines.push(`X:${pos.x.toFixed(3)} Y:${pos.y.toFixed(3)} Z:${pos.z.toFixed(3)} E:0.000 Count X:0 Y:0 Z:0`);
+    return { lines, ok: true };
+  }
+
+  // M115 — firmware info with EXTRUDER_COUNT so detect works.
+  if (/^M115\b/i.test(cmd)) {
+    lines.push('FIRMWARE_NAME:Prusa-Firmware-Buddy MOCK MACHINE_TYPE:Original Prusa XL EXTRUDER_COUNT:3');
+    lines.push('Cap:TOOLCHANGE:1');
+    return { lines, ok: true };
+  }
+
+  // M218 T<n> X.. Y.. — set offset for specific tool (Z not settable)
+  const m218set = /^M218\s+T(\d+)(?=.*\bX(-?\d+(?:\.\d+)?)\b)(?=.*\bY(-?\d+(?:\.\d+)?)\b)/i.exec(cmd);
+  if (m218set) {
+    const idx = parseInt(m218set[1], 10);
+    if (state.tools?.[idx]) {
+      const existing = state.tools[idx].current || { x: 0, y: 0, z: 0 };
+      state.tools[idx].current = {
+        x: parseFloat(m218set[2]),
+        y: parseFloat(m218set[3]),
+        z: existing.z,  // Z is read-only from our POV
+      };
+    }
+    return { lines, ok: true };
+  }
+
+  // M218 (no args) — query all offsets in Prusa Buddy format:
+  //   echo:Hotend offsets: X,Y,Z X,Y,Z X,Y,Z ...
+  if (/^M218\s*$/i.test(cmd)) {
+    const n = state.numTools || 3;
+    const parts = [];
+    for (let i = 0; i < 6; i++) {  // XL reports 6 slots regardless
+      const t = state.tools?.[i];
+      if (t?.current) {
+        parts.push(`${t.current.x.toFixed(2)},${t.current.y.toFixed(2)},${(t.current.z || 0).toFixed(3)}`);
+      } else {
+        parts.push('0.00,0.00,0.000');
+      }
+    }
+    lines.push(`echo:Hotend offsets: ${parts.join(' ')}`);
+    return { lines, ok: true };
+  }
+
+  // M500, M400, others: just ok.
+  return { lines, ok: true };
+}
+
+async function sendGcode(cmd, { mockDelay = null, mockResponse = null } = {}) {
+  log(cmd, 'tx');
+
+  // Moves invalidate the last-known position until M114 confirms.
+  if (/^(G0|G1|G28|G30)\b/i.test(cmd)) {
+    markPosStale();
+  }
+
+  let lines;
+  if (state.transport === 'mock') {
+    const delay = mockDelay !== null ? mockDelay : mockDelayFor(cmd);
+    await new Promise(r => setTimeout(r, delay));
+    if (mockResponse) {
+      lines = mockResponse;
+    } else {
+      const result = handleMockCommand(cmd);
+      lines = result.lines;
+    }
+    lines.forEach(l => log(l, 'rx'));
+    log('ok (mock)', 'rx');
+  } else if (state.transport === 'serial' && state.serialWriter) {
+    await state.serialWriter.write(new TextEncoder().encode(cmd + '\n'));
+    lines = await new Promise((res, rej) => {
+      const timer = setTimeout(() => rej(new Error('ok timeout: ' + cmd)), 60000);
+      const resolver = (l) => { clearTimeout(timer); res(l); };
+      const rejector = (err) => { clearTimeout(timer); rej(err); };
+      pendingCommands.push({ res: resolver, rej: rejector, lines: [] });
+    });
+  } else {
+    throw new Error('No transport');
+  }
+
+  // If this was M114, auto-refresh the position readout in the header.
+  if (/^M114\b/i.test(cmd)) {
+    parseAndDisplayM114(lines);
+  }
+
+  return lines;
+}
+
+async function connectPrinter() {
+  const mode = $('transportMode').value;
+  state.transport = mode;
+  if (mode === 'mock') {
+    $('printerPill').textContent = 'PRINTER MOCK';
+    $('printerPill').classList.add('on');
+    state.printerConnected = true;
+    $('btnConnect').style.display = 'none';
+    $('btnDisconnect').style.display = '';
+    $('transportMode').disabled = true;
+    log('Mock printer connected', 'sys');
+    await initAfterConnect();
+    return;
+  }
+  if (!('serial' in navigator)) { log('Web Serial unsupported — use Chrome', 'err'); return; }
+  try {
+    state.serialPort = await navigator.serial.requestPort();
+    await state.serialPort.open({ baudRate: +$('baudRate').value });
+    state.serialWriter = state.serialPort.writable.getWriter();
+    state.serialReader = state.serialPort.readable.getReader();
+    $('printerPill').textContent = 'PRINTER SERIAL';
+    $('printerPill').classList.add('on');
+    state.printerConnected = true;
+    $('btnConnect').style.display = 'none';
+    $('btnDisconnect').style.display = '';
+    $('transportMode').disabled = true;
+    log('Serial connected', 'sys');
+    readSerialLoop();
+    await new Promise(r => setTimeout(r, 600));
+    await initAfterConnect();
+  } catch(e) { log('connect failed: ' + e.message, 'err'); }
+}
+
+async function disconnectPrinter() {
+  try {
+    if (state.serialReader) {
+      try { await state.serialReader.cancel(); } catch(e) {}
+      try { state.serialReader.releaseLock(); } catch(e) {}
+      state.serialReader = null;
+    }
+    if (state.serialWriter) {
+      try { state.serialWriter.releaseLock(); } catch(e) {}
+      state.serialWriter = null;
+    }
+    if (state.serialPort) {
+      try { await state.serialPort.close(); } catch(e) {}
+      state.serialPort = null;
+    }
+  } catch(e) { log('Disconnect error: ' + e.message, 'err'); }
+  state.printerConnected = false;
+  state.homed = false;
+  state.originalOffsets = null;  // clear snapshot so reconnect reads fresh
+  $('printerPill').textContent = 'PRINTER OFF';
+  $('printerPill').classList.remove('on');
+  $('btnConnect').style.display = '';
+  $('btnDisconnect').style.display = 'none';
+  $('transportMode').disabled = false;
+  updateJogEnabled();
+  log('Printer disconnected', 'sys');
+  maybeAdvanceFromConnect();
+}
+
+async function initAfterConnect() {
+  await withBusy('Detecting printer', 'M115 + probe tools', null,
+    async () => await detectToolCount());
+  await withBusy('Reading offsets', 'M218 for each tool', null,
+    async () => await refreshAllOffsets());
+  // Initial position read so the jog header shows something
+  try { await sendGcode('M114'); } catch(e) {}
+  maybeAdvanceFromConnect();
+}
+
+// ============================================================
+// M114 / M218
+// ============================================================
+async function getCurrentXY() {
+  const lines = await sendGcode('M114');
+  const joined = lines.join(' ');
+  const xm = /X:\s*(-?\d+(?:\.\d+)?)/i.exec(joined);
+  const ym = /Y:\s*(-?\d+(?:\.\d+)?)/i.exec(joined);
+  if (!xm || !ym) throw new Error('M114 did not return X/Y: ' + joined);
+  return { x: parseFloat(xm[1]), y: parseFloat(ym[1]) };
+}
+
+// Read all tool offsets in a single M218 query. Prusa Buddy returns:
+//   echo:Hotend offsets: 0.00,0.00,0.000 -0.55,-0.95,-0.106 ...
+// Each space-separated entry is one tool, as X,Y,Z.
+// Returns an array of { x, y, z } indexed by tool (0-based). Unpopulated
+// slots may appear as "0.00,0.00,0.000" so we can't distinguish an empty
+// slot from a zero-offset active tool without other info — detection of
+// tool count uses M115's EXTRUDER_COUNT with a fallback to array length.
+async function readAllToolOffsets() {
+  try {
+    const lines = await sendGcode('M218');
+    // Find the line with "Hotend offsets" (case-insensitive)
+    let payload = null;
+    for (const line of lines) {
+      const m = /Hotend\s*offsets\s*:\s*(.+)$/i.exec(line);
+      if (m) { payload = m[1].trim(); break; }
+    }
+    if (!payload) {
+      log(`M218 did not return "Hotend offsets" line: ${lines.join(' | ')}`, 'err');
+      return null;
+    }
+    // Parse space-separated entries, each "X,Y,Z"
+    const entries = payload.split(/\s+/).filter(s => s.length > 0);
+    const offsets = [];
+    for (const e of entries) {
+      const parts = e.split(',').map(Number);
+      if (parts.length >= 3 && parts.every(n => !isNaN(n))) {
+        offsets.push({ x: parts[0], y: parts[1], z: parts[2] });
+      }
+    }
+    if (!offsets.length) {
+      log(`M218 payload parsed but no valid entries: ${payload}`, 'err');
+      return null;
+    }
+    return offsets;
+  } catch(e) {
+    log(`readAllToolOffsets: ${e.message}`, 'err');
+    return null;
+  }
+}
+
+// Single-tool read convenience — uses the bulk read and indexes into it.
+async function readToolOffset(idx) {
+  const all = await readAllToolOffsets();
+  if (!all || idx >= all.length) return null;
+  return all[idx];
+}
+
+async function detectToolCount() {
+  if (state.transport === 'mock') {
+    state.numTools = 3;
+    state.tools = {};
+    for (let i = 0; i < state.numTools; i++) {
+      state.tools[i] = {
+        current: i === 0
+          ? { x: 0, y: 0, z: 0 }
+          : { x: +(Math.random()*0.4-0.2).toFixed(4), y: +(Math.random()*0.4-0.2).toFixed(4), z: 0 },
+        saved: null,
+        status: 'pending',
+      };
+    }
+    renderOffsetsTable();
+    log(`(mock) Simulated ${state.numTools} tools`, 'sys');
+    return;
+  }
+  // Real printer: prefer M115's EXTRUDER_COUNT.
+  let n = null;
+  try {
+    const lines = await sendGcode('M115');
+    const joined = lines.join(' ');
+    const m = /EXTRUDER_COUNT\s*[:=]\s*(\d+)/i.exec(joined);
+    if (m) {
+      n = Math.max(1, Math.min(6, parseInt(m[1], 10)));
+      log(`Detected ${n} tools from M115`, 'sys');
+    }
+  } catch(e) {
+    log('M115 failed: ' + e.message, 'err');
+  }
+  if (n === null) {
+    // Fallback: read M218, count non-default entries (but this is
+    // unreliable since active tools can legitimately have 0,0,0 offset)
+    const offsets = await readAllToolOffsets();
+    n = offsets ? Math.min(6, offsets.length) : 2;
+    log(`Fallback: using ${n} tools from M218 entry count`, 'sys');
+  }
+  state.numTools = n;
+  state.tools = {};
+  for (let i = 0; i < state.numTools; i++) {
+    state.tools[i] = { current: { x: 0, y: 0, z: 0 }, saved: null, status: 'pending' };
+  }
+  renderOffsetsTable();
+}
+
+async function refreshAllOffsets() {
+  if (state.transport === 'mock') {
+    // In mock mode, synthesize originals from state.tools[i].current (first call)
+    if (!state.originalOffsets) {
+      state.originalOffsets = [];
+      for (let i = 0; i < state.numTools; i++) {
+        const c = state.tools[i] ? state.tools[i].current : { x: 0, y: 0, z: 0 };
+        state.originalOffsets.push({ x: c.x, y: c.y, z: c.z });
+      }
+      log(`(mock) Original offsets snapshotted: ${state.originalOffsets.map((o,i) => `T${i}(${o.x.toFixed(3)},${o.y.toFixed(3)})`).join(' ')}`, 'sys');
+    }
+    renderOffsetsTable();
+    log('(mock) Offsets from local state', 'sys');
+    return;
+  }
+  const offsets = await readAllToolOffsets();
+  if (!offsets) {
+    log('refreshAllOffsets: M218 read failed', 'err');
+    return;
+  }
+  for (let i = 0; i < state.numTools; i++) {
+    if (state.tools[i] && offsets[i]) {
+      state.tools[i].current = { ...offsets[i] };
+    }
+  }
+  // First real read after connect — snapshot originals (never overwritten this session)
+  if (!state.originalOffsets) {
+    state.originalOffsets = offsets.slice(0, state.numTools).map(o => ({ x: o.x, y: o.y, z: o.z }));
+    log(`Original offsets snapshotted (session start): ${state.originalOffsets.map((o,i) => `T${i}(${o.x.toFixed(3)},${o.y.toFixed(3)},${o.z.toFixed(3)})`).join(' ')}`, 'sys');
+  }
+  renderOffsetsTable();
+  log(`Offsets refreshed: ${offsets.map((o, i) => `T${i}(${o.x.toFixed(3)},${o.y.toFixed(3)},${o.z.toFixed(3)})`).join(' ')}`, 'sys');
+}
+
+// ============================================================
+// OFFSETS TABLE
+// ============================================================
+function renderOffsetsTable() {
+  const tbl = $('offsetsTable');
+  const rows = [];
+  rows.push(`
+    <tr>
+      <th>Tool</th>
+      <th>Status</th>
+      <th>Original (at connect)</th>
+      <th>Current offset (mm)</th>
+      <th>Saved this session</th>
+      <th></th>
+    </tr>
+  `);
+  for (let i = 0; i < state.numTools; i++) {
+    const t = state.tools[i] || { current: {x:0,y:0,z:0}, saved: null, status: 'pending' };
+    const orig = state.originalOffsets ? state.originalOffsets[i] : null;
+    const isActive = (i === state.currentTool);
+    const isT0 = (i === 0);
+    const classes = [];
+    if (isActive) classes.push('active');
+    if (isT0) classes.push('t0');
+    let tClass = isT0 ? 't0' : '';
+    if (t.status === 'done') tClass = 'done';
+    if (t.status === 'flagged') tClass = 'flagged';
+
+    const statusLabel = {
+      pending: 'pending',
+      active: 'picked',
+      done: 'saved ✓',
+      flagged: 'flagged (NOK)',
+    }[t.status] || 'pending';
+    const zVal = (t.current.z !== undefined && t.current.z !== null) ? t.current.z.toFixed(3) : '—';
+    const origTxt = orig
+      ? `X ${orig.x.toFixed(4)} Y ${orig.y.toFixed(4)}`
+      : '—';
+    const savedTxt = t.saved
+      ? `${t.saved.x.toFixed(4)}, ${t.saved.y.toFixed(4)}`
+      : '—';
+    // Pick button: only enabled if printer connected + homed. For T0 also works.
+    const pickDisabled = !(state.printerConnected && state.homed);
+    const toLabel = state.t0RefXY ? ' · go to ref' : '';
+
+    rows.push(`
+      <tr class="${classes.join(' ')}">
+        <td><div class="tcell ${tClass}">T${i}</div></td>
+        <td><span class="status-dot ${t.status}"></span><span style="color:var(--dim); font-size:10px;">${statusLabel}${isActive ? ' · active' : ''}</span></td>
+        <td><span class="coord" style="color:var(--dim);">${origTxt}</span></td>
+        <td>
+          <span class="coord">X ${t.current.x.toFixed(4)} Y ${t.current.y.toFixed(4)}</span>
+          <span class="coord" style="color:var(--dim); margin-left:6px;">Z ${zVal}</span>
+        </td>
+        <td><span class="coord" style="color:var(--good);">${savedTxt}</span></td>
+        <td>
+          <button class="pickTool" data-tool="${i}" ${pickDisabled ? 'disabled' : ''}
+                  style="padding:3px 8px; font-size:10px;"
+                  title="Pick T${i}${toLabel}">Pick${toLabel}</button>
+        </td>
+      </tr>
+    `);
+  }
+  tbl.innerHTML = rows.join('');
+  // Wire Pick buttons
+  document.querySelectorAll('#offsetsTable button.pickTool').forEach(b => {
+    b.onclick = () => pickToolAndGoToRef(parseInt(b.dataset.tool, 10));
+  });
+  // Enable/disable Restore button based on whether we have originals + printer ready
+  const btnR = $('btnRestoreOriginal');
+  if (btnR) {
+    btnR.disabled = !(state.originalOffsets && state.printerConnected);
+  }
+}
+
+// Pick button handler — explicit tool change + move to P_ref (if set)
+async function pickToolAndGoToRef(toolIdx) {
+  if (!state.printerConnected || !state.homed) {
+    log('Pick blocked — printer must be connected and homed', 'err');
+    return;
+  }
+  try {
+    await withBusy(`Picking T${toolIdx}`, 'Tool change', `T${toolIdx}`,
+      async () => await sendGcode(`T${toolIdx}`));
+    setCurrentToolUI(toolIdx);
+    if (state.t0RefXY) {
+      await withBusy('Moving to P_ref', `Overshoot + return to (${state.t0RefXY.x.toFixed(2)}, ${state.t0RefXY.y.toFixed(2)})`, null,
+        async () => {
+          await sendGcode('G90');
+          await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+          await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
+          await waitAndSyncPos();
+        });
+    } else {
+      log('P_ref not set — tool picked, no move performed', 'sys');
+    }
+    renderOffsetsTable();
+  } catch(e) {
+    log('Pick failed: ' + e.message, 'err');
+    hideBusy();
+  }
+}
+
+// Restore original offsets (written at Connect time). Sends M218 per tool,
+// then a single M500 to persist.
+async function restoreOriginalOffsets() {
+  if (!state.originalOffsets) { log('No original offsets stored', 'err'); return; }
+  if (!state.printerConnected) { log('Not connected', 'err'); return; }
+  const confirm = await askUser(
+    'Restore original offsets?',
+    `This will overwrite all current offsets with the values read when you connected. <b>${state.originalOffsets.length}</b> tools will be restored, then saved to EEPROM.`,
+    [
+      { label: 'Restore and save', kind: 'danger' },
+      { label: 'Cancel', kind: '' }
+    ]
+  );
+  if (confirm !== 0) { log('Restore cancelled', 'sys'); return; }
+
+  log('Restoring original offsets…', 'sys');
+  try {
+    for (let i = 0; i < state.originalOffsets.length; i++) {
+      const o = state.originalOffsets[i];
+      const cmd = `M218 T${i} X${o.x.toFixed(4)} Y${o.y.toFixed(4)}`;
+      await withBusy(`Writing T${i}`, cmd, cmd,
+        async () => await sendGcode(cmd));
+    }
+    await withBusy('Persisting', 'M500', 'M500',
+      async () => await sendGcode('M500'));
+    // Re-read + sync table
+    const latest = await readAllToolOffsets();
+    for (let i = 0; i < latest.length && i < state.numTools; i++) {
+      if (!state.tools[i]) state.tools[i] = { current: latest[i], saved: null, status: i === 0 ? 'done' : 'pending' };
+      else state.tools[i].current = latest[i];
+    }
+    renderOffsetsTable();
+    log('Original offsets restored ✓', 'sys');
+  } catch(e) {
+    log('Restore failed: ' + e.message, 'err');
+    hideBusy();
+  }
+}
+
+// ============================================================
+// MODAL
+// ============================================================
+// Non-blocking prompt: uses the existing wizard bar at the top of the
+// work area so the camera/zoom view remains fully visible.
+// Returns a Promise<number> matching askUser's old API.
+function askUser(title, msg, buttons) {
+  return new Promise(resolve => {
+    const actions = buttons.map((b, i) => ({
+      label: b.label,
+      kind: b.kind || (i === 0 ? 'good' : 'danger'),
+      onclick: () => {
+        // Restore the prompt back to a neutral state so stray clicks don't
+        // re-resolve. The next flow step will overwrite with its own wizard().
+        $('wizardActions').innerHTML = '';
+        resolve(i);
+      },
+    }));
+    wizard(title, msg, actions);
+    // Scroll the page so the wizard bar is in view (but don't steal focus
+    // from the camera layout).
+    $('wizardPrompt').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+}
+
+// ============================================================
+// JOG — debounced, absolute, overshoot+return
+// ============================================================
+let jogDebounceTimer = null;
+
+// Jog by an explicit signed amount (new per-button pad).
+function jogByStep(axis, stepSigned) {
+  if (!state.homed) { log('Jog blocked — printer not homed', 'err'); return; }
+  if (!state.printerConnected) { log('Jog blocked — printer not connected', 'err'); return; }
+  if (axis === 'z') {
+    if (!state.zJogEnabled) { log('Z jog disabled in this stage', 'err'); return; }
+    state.pendingJog.z += stepSigned;
+  } else if (axis === 'x') {
+    state.pendingJog.x += stepSigned;
+    state.jogAccumMm.x += stepSigned;
+  } else {
+    state.pendingJog.y += stepSigned;
+    state.jogAccumMm.y += stepSigned;
+  }
+  updateJogPendingUI();
+  if (jogDebounceTimer) clearTimeout(jogDebounceTimer);
+  jogDebounceTimer = setTimeout(runPendingJog, state.jogDebounceMs);
+}
+
+function jogButtonXY(axis, direction) {
+  if (!state.homed) { log('Jog blocked — printer not homed', 'err'); return; }
+  if (!state.printerConnected) { log('Jog blocked — printer not connected', 'err'); return; }
+  const step = state.stepMmXY * direction;
+  // Jog is pure printer-axis: X+ button = X+ on printer. Camera rotation
+  // only affects the VISUAL display; it does NOT transform the jog axis.
+  if (axis === 'x') { state.pendingJog.x += step; state.jogAccumMm.x += step; }
+  else              { state.pendingJog.y += step; state.jogAccumMm.y += step; }
+  updateJogPendingUI();
+  if (jogDebounceTimer) clearTimeout(jogDebounceTimer);
+  jogDebounceTimer = setTimeout(runPendingJog, state.jogDebounceMs);
+}
+
+function jogButtonZ(direction) {
+  if (!state.homed) { log('Jog blocked — printer not homed', 'err'); return; }
+  if (!state.zJogEnabled) { log('Z jog disabled in this stage', 'err'); return; }
+  const step = state.stepMmZ * direction;
+  state.pendingJog.z += step;
+  updateJogPendingUI();
+  if (jogDebounceTimer) clearTimeout(jogDebounceTimer);
+  jogDebounceTimer = setTimeout(runPendingJog, state.jogDebounceMs);
+}
+
+function updateJogPendingUI() {
+  const p = state.pendingJog;
+  if (p.x === 0 && p.y === 0 && p.z === 0) {
+    if (!state.jogBusy) $('jogPending').textContent = '';
+    return;
+  }
+  const parts = [];
+  if (p.x !== 0) parts.push(`X${p.x>=0?'+':''}${p.x.toFixed(3)}`);
+  if (p.y !== 0) parts.push(`Y${p.y>=0?'+':''}${p.y.toFixed(3)}`);
+  if (p.z !== 0) parts.push(`Z${p.z>=0?'+':''}${p.z.toFixed(3)}`);
+  if (state.jogBusy) {
+    $('jogPending').textContent = `queued (runs next): ${parts.join(' ')}`;
+  } else {
+    $('jogPending').textContent = `pending: ${parts.join(' ')} (${state.jogDebounceMs}ms)`;
+  }
+}
+
+async function runPendingJog() {
+  // Guard: don't start a second worker. If a jog is already running,
+  // the currently-running worker will pick up any new pending on completion.
+  if (state.jogBusy) return;
+
+  // Loop: drain pending until it's empty, so clicks that arrive while
+  // a move is in flight still get executed.
+  while (true) {
+    const p = { ...state.pendingJog };
+    if (p.x === 0 && p.y === 0 && p.z === 0) {
+      $('jogPending').textContent = '';
+      return;
+    }
+    state.pendingJog = { x: 0, y: 0, z: 0 };
+    state.jogBusy = true;
+
+    const parts = [];
+    if (p.x !== 0) parts.push(`X${p.x>=0?'+':''}${p.x.toFixed(3)}`);
+    if (p.y !== 0) parts.push(`Y${p.y>=0?'+':''}${p.y.toFixed(3)}`);
+    if (p.z !== 0) parts.push(`Z${p.z>=0?'+':''}${p.z.toFixed(3)}`);
+    $('jogPending').textContent = `running: ${parts.join(' ')}…`;
+    showBusy('Jogging', `Applying ${parts.join(' ')}`, null);
+
+    try {
+      const cur = await getCurrentXY();
+      let curZ = null;
+      const posLines = await sendGcode('M114');
+      const posJoined = posLines.join(' ');
+      const zm = /Z:\s*(-?\d+(?:\.\d+)?)/i.exec(posJoined);
+      if (zm) curZ = parseFloat(zm[1]);
+
+      // Translate canonical (UI-space) delta to printer-axis delta
+      const pDelta = uiDeltaToPrinterDelta(p.x, p.y);
+
+      await sendGcode('G90');
+      if (pDelta.x !== 0 || pDelta.y !== 0) {
+        // Final targets
+        const fX = cur.x + pDelta.x;
+        const fY = cur.y + pDelta.y;
+        // Overshoot: if that axis is moving, overshoot past final by its own amount.
+        // If axis is NOT moving, still push Y (or X) during overshoot by the smaller
+        // amount so BOTH CoreXY motors do unequal work. Sign chosen to match the
+        // moving axis when possible, else positive.
+        const xSign = pDelta.x >= 0 ? 1 : -1;
+        const ySign = pDelta.y >= 0 ? 1 : -1;
+        let ovXfinal, ovYfinal;
+        if (pDelta.x !== 0 && pDelta.y !== 0) {
+          // Both axes moving — overshoot each past its own target
+          ovXfinal = fX + xSign * state.overshootMm;
+          ovYfinal = fY + ySign * state.overshootYMm;
+        } else if (pDelta.x !== 0) {
+          // Pure X jog — overshoot X big, jitter Y small (same sign as X) during overshoot, return to cur.y on fine leg
+          ovXfinal = fX + xSign * state.overshootMm;
+          ovYfinal = cur.y + xSign * state.overshootYMm;
+        } else {
+          // Pure Y jog
+          ovXfinal = cur.x + ySign * state.overshootYMm;
+          ovYfinal = fY + ySign * state.overshootMm;
+        }
+        await sendGcode(`G1 X${ovXfinal.toFixed(4)} Y${ovYfinal.toFixed(4)} F${state.feedrateFast}`);
+        await sendGcode(`G1 X${fX.toFixed(4)} Y${fY.toFixed(4)} F${state.feedrateFine}`);
+      }
+      if (p.z !== 0 && curZ !== null) {
+        const fZ = curZ + p.z;
+        await sendGcode(`G1 Z${fZ.toFixed(4)} F${state.feedrateZ}`);
+      }
+      await waitAndSyncPos();
+    } catch(e) {
+      log('Jog failed: ' + e.message, 'err');
+      $('jogPending').textContent = 'error — see log';
+      state.jogBusy = false;
+      hideBusy();
+      return;
+    }
+    state.jogBusy = false;
+    hideBusy();
+    // Loop iterates: if more pending accumulated during this move,
+    // we run them now. If not, break out next iteration.
+  }
+}
+
+// ============================================================
+// JOG PAD (per-button jog — each button has baked-in step value)
+// ============================================================
+const XY_STEPS = [0.01, 0.05, 0.1, 0.5, 1, 5, 10]; // inner → outer
+const Z_STEPS  = [0.1, 0.5, 1, 5, 10];             // inner → outer (5 btns per direction)
+
+function fmtStep(s) {
+  if (s >= 1)  return String(s);
+  if (s >= 0.1) return s.toFixed(1);
+  return s.toFixed(2);
+}
+
+function renderJogPad() {
+  const body = $('jogPadBody');
+  body.innerHTML = '';
+  // Uniform grid: N×N where N = 2*len+1. For 7 steps, N=15. Center at (7,7).
+  // Y buttons span horizontally (colspan), X buttons span vertically (rowspan).
+  // Button at step i: span = 2*i + 1 cells perpendicular to its motion axis.
+  const N = 2 * XY_STEPS.length + 1; // 15
+  const CENTER = XY_STEPS.length;    // 7
+
+  const makeBtn = (label, title, cls, onclick) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title;
+    b.classList.add(cls);
+    b.onclick = onclick;
+    return b;
+  };
+
+  // startMap: "r,c" -> { el, rs, cs } — where to emit cells
+  // coveredSet: "r,c" covered by a rowspan/colspan from another start (skip emit)
+  const startMap = {};
+  const coveredSet = new Set();
+
+  const place = (r, c, rs, cs, el) => {
+    startMap[`${r},${c}`] = { el, rs, cs };
+    for (let dr = 0; dr < rs; dr++) {
+      for (let dc = 0; dc < cs; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        coveredSet.add(`${r+dr},${c+dc}`);
+      }
+    }
+  };
+
+  // Place Y+ buttons: row = len-1-stepIdx (outermost at top), colspan = 2*stepIdx+1
+  XY_STEPS.forEach((s, stepIdx) => {
+    const row = XY_STEPS.length - 1 - stepIdx;
+    const col = CENTER - stepIdx;
+    const cs = 2*stepIdx + 1;
+    const btn = makeBtn('↑', `Y+ ${fmtStep(s)}mm`, `step-i${stepIdx}`, () => jogByStep('y', +s));
+    btn.dataset.jogstep = 'y+';
+    place(row, col, 1, cs, btn);
+  });
+  // Place Y-: row = CENTER+1+stepIdx (innermost just below center)
+  XY_STEPS.forEach((s, stepIdx) => {
+    const row = CENTER + 1 + stepIdx;
+    const col = CENTER - stepIdx;
+    const cs = 2*stepIdx + 1;
+    const btn = makeBtn('↓', `Y− ${fmtStep(s)}mm`, `step-i${stepIdx}`, () => jogByStep('y', -s));
+    btn.dataset.jogstep = 'y-';
+    place(row, col, 1, cs, btn);
+  });
+  // Place X-: col = CENTER-1-stepIdx (innermost just left of center), rowspan = 2*stepIdx+1
+  XY_STEPS.forEach((s, stepIdx) => {
+    const col = CENTER - 1 - stepIdx;
+    const row = CENTER - stepIdx;
+    const rs = 2*stepIdx + 1;
+    const btn = makeBtn('←', `X− ${fmtStep(s)}mm`, `step-i${stepIdx}`, () => jogByStep('x', -s));
+    btn.dataset.jogstep = 'x-';
+    place(row, col, rs, 1, btn);
+  });
+  // Place X+
+  XY_STEPS.forEach((s, stepIdx) => {
+    const col = CENTER + 1 + stepIdx;
+    const row = CENTER - stepIdx;
+    const rs = 2*stepIdx + 1;
+    const btn = makeBtn('→', `X+ ${fmtStep(s)}mm`, `step-i${stepIdx}`, () => jogByStep('x', +s));
+    btn.dataset.jogstep = 'x+';
+    place(row, col, rs, 1, btn);
+  });
+  // Center anchor
+  {
+    const td = document.createElement('td');
+    td.className = 'center-cell';
+    td.textContent = '·';
+    startMap[`${CENTER},${CENTER}`] = { centerTd: td, rs: 1, cs: 1 };
+  }
+
+  // Emit rows
+  for (let r = 0; r < N; r++) {
+    const tr = document.createElement('tr');
+    for (let c = 0; c < N; c++) {
+      if (coveredSet.has(`${r},${c}`)) continue;
+      const entry = startMap[`${r},${c}`];
+      if (entry) {
+        let td;
+        if (entry.centerTd) {
+          td = entry.centerTd;
+        } else {
+          td = document.createElement('td');
+          td.appendChild(entry.el);
+        }
+        if (entry.rs > 1) td.rowSpan = entry.rs;
+        if (entry.cs > 1) td.colSpan = entry.cs;
+        tr.appendChild(td);
+      } else {
+        tr.appendChild(document.createElement('td'));
+      }
+    }
+    body.appendChild(tr);
+  }
+}
+
+function renderZJogPad() {
+  const body = $('zJogBody');
+  body.innerHTML = '';
+  // Z grid: NZ cols = 2*len + 1, for 5 steps NZ = 11.
+  // Z-: rows 0..4 (outermost at top). colspan for stepIdx i = 2i+1, centered.
+  // Divider: row 5.
+  // Z+: rows 6..10 (innermost closest to divider, outermost at bottom).
+  const NZ = 2 * Z_STEPS.length + 1;
+  const CZ = Z_STEPS.length;
+
+  const mk = (txt, title, cls, onclick, ds) => {
+    const b = document.createElement('button');
+    b.textContent = txt;
+    b.title = title;
+    b.classList.add(cls);
+    b.onclick = onclick;
+    b.dataset.zstep = ds;
+    return b;
+  };
+  const makeEmpty = (tr, n) => { for (let k = 0; k < n; k++) tr.appendChild(document.createElement('td')); };
+
+  // Z- rows (0..CZ-1): outermost at top
+  for (let rowIdx = 0; rowIdx < Z_STEPS.length; rowIdx++) {
+    const stepIdx = Z_STEPS.length - 1 - rowIdx;
+    const s = Z_STEPS[stepIdx];
+    const span = 2 * stepIdx + 1;
+    const pad = (NZ - span) / 2;
+    const tr = document.createElement('tr');
+    makeEmpty(tr, pad);
+    const td = document.createElement('td');
+    td.colSpan = span;
+    td.appendChild(mk('↑', `Z− ${fmtStep(s)}mm (nozzle appears to move up)`, `zstep-i${stepIdx}`, () => jogByStep('z', -s), '-'));
+    tr.appendChild(td);
+    makeEmpty(tr, pad);
+    body.appendChild(tr);
+  }
+  // Divider row
+  {
+    const tr = document.createElement('tr');
+    tr.className = 'zdivider';
+    const td = document.createElement('td');
+    td.colSpan = NZ;
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+  // Z+ rows (innermost near divider)
+  for (let rowIdx = 0; rowIdx < Z_STEPS.length; rowIdx++) {
+    const stepIdx = rowIdx; // rowIdx=0 → stepIdx=0 (innermost, just below divider)
+    const s = Z_STEPS[stepIdx];
+    const span = 2 * stepIdx + 1;
+    const pad = (NZ - span) / 2;
+    const tr = document.createElement('tr');
+    makeEmpty(tr, pad);
+    const td = document.createElement('td');
+    td.colSpan = span;
+    td.appendChild(mk('↓', `Z+ ${fmtStep(s)}mm (nozzle appears to move down)`, `zstep-i${stepIdx}`, () => jogByStep('z', +s), '+'));
+    tr.appendChild(td);
+    makeEmpty(tr, pad);
+    body.appendChild(tr);
+  }
+}
+
+// ============================================================
+// KEYBOARD
+// ============================================================
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  let ok = true;
+  if      (e.key === 'ArrowUp'    || e.key.toLowerCase() === 'w') jogButtonXY('y', +1);
+  else if (e.key === 'ArrowDown'  || e.key.toLowerCase() === 's') jogButtonXY('y', -1);
+  else if (e.key === 'ArrowLeft'  || e.key.toLowerCase() === 'a') jogButtonXY('x', -1);
+  else if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') jogButtonXY('x', +1);
+  else if (e.key === 'PageUp')   jogButtonZ(+1);
+  else if (e.key === 'PageDown') jogButtonZ(-1);
+  else ok = false;
+  if (ok) e.preventDefault();
+});
+
+// ============================================================
+// FLOW — STAGE TRANSITIONS
+// ============================================================
+
+function maybeAdvanceFromConnect() {
+  const camOk = state.camActive;
+  const prOk = state.printerConnected;
+
+  // Update setup card indicators
+  const camStep = $('setupStepCam');
+  const prStep = $('setupStepPrinter');
+  if (camStep) {
+    camStep.classList.toggle('done', camOk);
+    $('setupStatusCam').textContent = camOk ? 'ready' : 'waiting';
+  }
+  if (prStep) {
+    prStep.classList.toggle('done', prOk);
+    $('setupStatusPrinter').textContent = prOk ? 'ready' : 'waiting';
+  }
+
+  if (camOk && prOk) {
+    setStage('buildplate');
+    showBuildplatePrompt();
+  } else {
+    setStage('connect');
+    wizard('Stage A — Connect',
+      `Start the camera and connect the printer.<br>
+       Camera: ${camOk ? '<span style="color:var(--good)">✓</span>' : '<span style="color:var(--bad)">✗</span>'}
+       · Printer: ${prOk ? '<span style="color:var(--good)">✓</span>' : '<span style="color:var(--bad)">✗</span>'}`,
+      []);
+  }
+}
+
+async function showBuildplatePrompt() {
+  setStage('buildplate');
+  wizard('Stage B — Build plate',
+    'Is the build plate installed on the bed? It must be in place before homing.', [
+    { label: 'Yes, plate is on', kind: 'primary', onclick: async () => {
+        log('User confirmed build plate present', 'sys');
+        await flowHome();
+    }},
+    { label: 'Not yet', kind: 'danger', onclick: () => {
+        wizard('Install build plate', 'Place the build plate and then click "Plate is on".', [
+          { label: 'Plate is on now', kind: 'primary', onclick: async () => await flowHome() }
+        ]);
+    }},
+  ]);
+}
+
+async function flowHome() {
+  setStage('home');
+  wizard('Stage C — Homing',
+    'Homing XY, picking T0, probing Z at X100 Y150 with G30, then parking at X50 Y50.',
+    []);
+  try {
+    // 1. Home XY only — no Z probe action yet. Z axis unhomed after this.
+    await withBusy('Homing X/Y', 'Running G28 XY', 'G28 XY',
+      async () => {
+        await sendGcode('G28 XY');
+        await waitAndSyncPos();
+      });
+
+    // 2. Pick tool 0 so the right Z probe is engaged for the Z home.
+    await withBusy('Selecting T0', 'Picking tool 0 for Z probe', 'T0',
+      async () => await sendGcode('T0'));
+
+    // 3. Move tool 0 to chosen Z-probe XY. On Prusa XL, X100 Y150 is a
+    //    reasonable spot that clears the camera at X50 Y50 but still lets
+    //    the bed-mounted probe target engage (assuming standard bed).
+    //    NOTE: if Z_SAFE_HOMING in firmware is enforced, the printer may
+    //    override this and probe Z at bed center anyway. We log both
+    //    intended and actual positions via M114.
+    await withBusy('Moving to Z-probe spot', 'G1 X100 Y150', 'G1 X100 Y150',
+      async () => {
+        await sendGcode('G90');
+        await sendGcode('G1 X100 Y150 F3000');
+        await waitAndSyncPos();
+      });
+
+    // 4. Probe Z at the current XY (G30 = single Z probe at current
+    //    position). Unlike G28 Z, G30 does not invoke Z_SAFE_HOMING so
+    //    it actually probes where we placed the tool (X100, Y150).
+    await withBusy('Probing Z', 'G30 single Z probe at current position', 'G30',
+      async () => {
+        await sendGcode('G30');
+        await waitAndSyncPos();
+      });
+
+    state.homed = true;
+    updateJogEnabled();
+
+    // 5. Move bed/tool for camera clearance. On Prusa XL the tool moves,
+    //    so Z=32 gives camera clearance above the bed (user tuned for usb cam).
+    await withBusy('Lowering bed for camera', 'Z32 for camera clearance', 'G1 Z32',
+      async () => {
+        await sendGcode('G1 Z32 F600');
+        await waitAndSyncPos();
+      });
+
+    // 6. Park T0 nozzle at camera position.
+    await withBusy('Parking at X50 Y50', 'Nozzle to camera spot', 'G1 X50 Y50',
+      async () => {
+        await sendGcode('G1 X50 Y50 F3000');
+        await waitAndSyncPos();
+      });
+
+    state.currentTool = 0;
+    setCurrentToolUI(0);
+    renderOffsetsTable();
+    log('Homed (XY → T0 → G30@X100Y150 → Z32 → park X50 Y50).', 'sys');
+
+    wizard('Place camera',
+      'Place the camera under the nozzle (at X50 Y50 on the bed), pointing up.',
+      [{ label: 'Camera is placed', kind: 'primary', onclick: () => flowRotateTest() }]);
+  } catch(e) { log('Homing failed: ' + e.message, 'err'); hideBusy(); }
+}
+
+// ============================================================
+// STAGE D — Rotation test
+// ============================================================
+// ============================================================
+// STAGE D — Orientation test (two single-axis moves)
+//
+// For each axis (X then Y): move printer +5mm on that axis, pause,
+// return to start, and ask user which edge of the camera view the
+// nozzle moved toward. Clickable diagram shows 4 edges.
+//
+// Results become two direction vectors (xDir, yDir), one per printer
+// axis, each being one of {right, down, left, up}. From those, we
+// derive the display rotation and flip flags that make the view
+// natural (printer-X+ appears rightward, printer-Y+ appears upward).
+// ============================================================
+async function flowRotateTest() {
+  setStage('rotateTest');
+  // Reset any prior test state AND reset camera display to identity.
+  // This is crucial: user observations during the test must be in raw
+  // camera space so the computed transform is absolute, not incremental.
+  state._orientTest = { xDir: null, yDir: null };
+  state.camDisplay = { rotation: 0, flipX: false, flipY: false };
+  applyCameraDisplay();
+  log('Orientation test: camera display reset to identity (no rotation/flip)', 'sys');
+  // Auto-run immediately: move X+5, prompt, then Y+5, prompt, then resolve.
+  runOrientTestAxis('x');
+}
+
+async function runOrientTestAxis(axis) {
+  try {
+    const start = await getCurrentXY();
+    const label = axis.toUpperCase();
+    log(`Orientation test ${label}+5 from (${start.x.toFixed(3)}, ${start.y.toFixed(3)})`, 'sys');
+
+    wizard(`Stage D — Orientation test (${label}+)`,
+      `Moving nozzle ${label}+5mm. Watch which direction it moves on screen.`, []);
+
+    const targetX = axis === 'x' ? start.x + 5 : start.x;
+    const targetY = axis === 'y' ? start.y + 5 : start.y;
+
+    await withBusy(`Test move ${label}+5`, `Moving ${label} by +5mm`, `G1 ${label}+5`,
+      async () => {
+        await sendGcode('G90');
+        await sendGcode(`G1 X${targetX.toFixed(3)} Y${targetY.toFixed(3)} F3000`);
+        await waitAndSyncPos();
+      });
+
+    await new Promise(r => setTimeout(r, 1500));
+
+    await withBusy('Returning', 'Back to start', null,
+      async () => {
+        await sendGcode(`G1 X${start.x.toFixed(3)} Y${start.y.toFixed(3)} F3000`);
+        await waitAndSyncPos();
+      });
+
+    // Show edge-clickable diagram + retry button
+    showOrientDiagramPrompt(axis);
+  } catch(e) {
+    log('Orientation test failed: ' + e.message, 'err');
+    hideBusy();
+  }
+}
+
+function showOrientDiagramPrompt(axis) {
+  const label = axis.toUpperCase();
+  $('wizardPrompt').classList.remove('good');
+  $('wizardTitle').textContent = `Which edge did ${label}+ move toward?`;
+  $('wizardBody').innerHTML = `
+    <div class="orient-diagram-wrap">
+      <div class="orient-hint">Click the edge the nozzle moved toward on screen, or <b>Retry</b> to repeat the move:</div>
+      <div class="orient-diagram">
+        <button class="orient-edge orient-top"    data-dir="up">↑ Up</button>
+        <button class="orient-edge orient-right"  data-dir="right">→ Right</button>
+        <button class="orient-edge orient-bottom" data-dir="down">↓ Down</button>
+        <button class="orient-edge orient-left"   data-dir="left">← Left</button>
+        <div class="orient-center">camera<br>view</div>
+      </div>
+    </div>
+  `;
+  $('wizardActions').innerHTML = '';
+  // Add a Retry button that re-runs this axis
+  const retryBtn = document.createElement('button');
+  retryBtn.textContent = '↻ Retry move';
+  retryBtn.className = '';
+  retryBtn.onclick = () => runOrientTestAxis(axis);
+  $('wizardActions').appendChild(retryBtn);
+
+  document.querySelectorAll('.orient-edge').forEach(b => {
+    b.onclick = () => recordOrientAxis(axis, b.dataset.dir);
+  });
+}
+
+function recordOrientAxis(axis, direction) {
+  state._orientTest[axis + 'Dir'] = direction;
+  log(`Orientation test: ${axis.toUpperCase()}+ → ${direction}`, 'sys');
+
+  if (axis === 'x') {
+    // Chain directly to Y (auto-run, no click)
+    runOrientTestAxis('y');
+  } else {
+    // Both done — compute camDisplay, then go straight to Stage E
+    resolveCameraDisplay();
+  }
+}
+
+function resolveCameraDisplay() {
+  const { xDir, yDir } = state._orientTest;
+
+  // Printer axis vectors in screen space:
+  //   xDir: direction printer-X+ appears on screen
+  //   yDir: direction printer-Y+ appears on screen
+  const dirVec = { right: [+1, 0], down: [0, +1], left: [-1, 0], up: [0, -1] };
+  const vx = dirVec[xDir];
+  const vy = dirVec[yDir];
+
+  log(`Orient math: vx=[${vx}] (X+ → ${xDir}), vy=[${vy}] (Y+ → ${yDir})`, 'sys');
+
+  const applyTransform = (v, rotation, flipX, flipY) => {
+    let [x, y] = v;
+    if (flipX) x = -x;
+    if (flipY) y = -y;
+    switch (rotation) {
+      case 0:   return [x, y];
+      case 90:  return [-y, x];
+      case 180: return [-x, -y];
+      case 270: return [y, -x];
+    }
+  };
+
+  const eq = (a, b) => a[0] === b[0] && a[1] === b[1];
+  const targetX = [+1, 0];
+  const targetY = [0, -1];
+
+  let results = [];
+  for (const rotation of [0, 90, 180, 270]) {
+    for (const flipX of [false, true]) {
+      for (const flipY of [false, true]) {
+        const tx = applyTransform(vx, rotation, flipX, flipY);
+        const ty = applyTransform(vy, rotation, flipX, flipY);
+        if (eq(tx, targetX) && eq(ty, targetY)) {
+          results.push({ rotation, flipX, flipY });
+        }
+      }
+    }
+  }
+  let found = null;
+  if (results.length) {
+    results.sort((a, b) => {
+      const flipsA = (a.flipX ? 1 : 0) + (a.flipY ? 1 : 0);
+      const flipsB = (b.flipX ? 1 : 0) + (b.flipY ? 1 : 0);
+      if (flipsA !== flipsB) return flipsA - flipsB;
+      return a.rotation - b.rotation;
+    });
+    found = results[0];
+    if (results.length > 1) {
+      log(`Orient: ${results.length} equivalent transforms found: ${JSON.stringify(results)}`, 'sys');
+    }
+  }
+
+  if (!found) {
+    log('Orientation test: could not derive transform — using identity', 'err');
+    found = { rotation: 0, flipX: false, flipY: false };
+  }
+
+  state.camDisplay = found;
+  applyCameraDisplay();
+  log(`Orientation resolved: rotation=${found.rotation}° flipX=${found.flipX} flipY=${found.flipY}`, 'sys');
+  log(`CSS transform applied: ${transformCssString()}`, 'sys');
+
+  // Go straight to Stage E (focus + center). Verification substage dropped.
+  flowPositionT0();
+}
+
+async function flowPositionT0() {
+  setStage('positionT0');
+  updateZLockState();
+  log('Stage E — camera focus + nozzle centering (Z jog enabled)', 'sys');
+  wizard('Stage E — Focus camera + center nozzle',
+    `<ol style="margin:4px 0 0 18px; padding:0; font-size:11px; line-height:1.6;">
+      <li>Use <b>Z−</b> (top) to bring bed up for focus, <b>Z+</b> (bottom) to lower bed.</li>
+      <li>Use <b>X / Y</b> jog to center the nozzle hole in the camera view.</li>
+      <li>Watch the zoom view to confirm focus + centering.</li>
+     </ol>`,
+    [{ label: 'Camera focused · nozzle centered', kind: 'primary', onclick: () => flowReticle() }]);
+}
+
+async function flowReticle() {
+  // Capture the P_ref XY here
+  try {
+    const xy = await withBusy('Reading reference position', 'M114', 'M114',
+      async () => await getCurrentXY());
+    state.t0RefXY = { x: xy.x, y: xy.y };
+    updatePosRefDisplay();
+    log(`P_ref captured: (${xy.x.toFixed(4)}, ${xy.y.toFixed(4)})`, 'sys');
+  } catch(e) { log('Could not read M114: ' + e.message, 'err'); hideBusy(); return; }
+
+  setStage('reticle');
+  updateZLockState();
+  wizard('Stage F — Place reticle',
+    `Drag zoom box over nozzle · drag circles over <b>hole center</b>. Adjust <b>inner</b> size to hole, <b>outer</b> to nozzle edge. Locks after continue.`,
+    [{ label: 'Reticle placed · lock', kind: 'primary', onclick: () => lockReticleAndBeginTools() }]);
+}
+
+function lockReticleAndBeginTools() {
+  state.t0Ref = { x: state.reticle.x, y: state.reticle.y };
+  state.reticleLocked = true;
+  updateReticleLockedUI();
+  // Ensure tools map exists (in case user skipped proper connect)
+  if (!state.tools || Object.keys(state.tools).length === 0) {
+    log('No tools map — initializing defaults (2 tools assumed)', 'err');
+    state.numTools = 2;
+    state.tools = {
+      0: { current: { x: 0, y: 0 }, saved: null, status: 'pending' },
+      1: { current: { x: 0, y: 0 }, saved: null, status: 'pending' },
+    };
+  }
+  if (state.tools[0]) state.tools[0].status = 'done';
+  renderOffsetsTable();
+  log(`Reticle locked at pixel (${state.t0Ref.x.toFixed(1)}, ${state.t0Ref.y.toFixed(1)})`, 'sys');
+  flowToolLoop(1);
+}
+
+// ============================================================
+// STAGE F — per-tool calibration
+// ============================================================
+async function flowToolLoop(toolIdx) {
+  if (toolIdx >= state.numTools) {
+    // All tools done → revalidation
+    flowRevalidate();
+    return;
+  }
+  setStage('toolloop');
+  await calibrateTool(toolIdx);
+}
+
+async function calibrateTool(toolIdx) {
+  state.tools[toolIdx].status = 'active';
+  state.currentTool = toolIdx;
+  renderOffsetsTable();
+
+  wizard(`Stage G — Calibrate T${toolIdx}`,
+    `Picking T${toolIdx} and moving to reference XY…`, []);
+
+  try {
+    await withBusy(`Picking T${toolIdx}`, `Tool change in progress`, `T${toolIdx}`,
+      async () => await sendGcode(`T${toolIdx}`));
+    // Overshoot + return: kills mechanical backlash after tool change by
+    // approaching P_ref from a consistent direction every time. X and Y
+    // overshoot amounts differ (20/16) so CoreXY motors do unequal work.
+    await withBusy('Moving to reference', `Overshoot +X${state.overshootMm} +Y${state.overshootYMm}mm, return to P_ref`, null,
+      async () => {
+        await sendGcode('G90');
+        await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+        await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
+        await waitAndSyncPos();
+      });
+    setCurrentToolUI(toolIdx);
+    log(`T${toolIdx} picked, moved to P_ref`, 'sys');
+  } catch(e) {
+    log('Tool pick/move failed: ' + e.message, 'err');
+    hideBusy();
+    return;
+  }
+
+  await promptJogUntilCentered(toolIdx);
+}
+
+async function promptJogUntilCentered(toolIdx) {
+  state.jogAccumMm = { x: 0, y: 0 };
+  wizard(`T${toolIdx} — Jog to align`,
+    `Jog X/Y until T${toolIdx} lines up with the <b>locked reticle</b>. Clicks batch (300ms).`,
+    [{ label: 'Nozzle is centered · double check', kind: 'primary',
+       onclick: () => doubleCheckBeforeSave(toolIdx) }]);
+}
+
+async function doubleCheckBeforeSave(toolIdx) {
+  // Flush pending jog
+  if (jogDebounceTimer) { clearTimeout(jogDebounceTimer); jogDebounceTimer = null; }
+  if (state.pendingJog.x !== 0 || state.pendingJog.y !== 0) {
+    log('Flushing pending jog…', 'sys');
+    await runPendingJog();
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  wizard(`T${toolIdx} — Double check`,
+    `Backlash-kill move: +X${state.overshootMm}/+Y${state.overshootYMm} then back (CoreXY motor-exercise). Watch zoom view.`, []);
+
+  try {
+    await withBusy('Backlash kill', `+X${state.overshootMm}/+Y${state.overshootYMm} overshoot then return`, null, async () => {
+      const cur = await getCurrentXY();
+      await sendGcode('G90');
+      await sendGcode(`G1 X${(cur.x + state.overshootMm).toFixed(3)} Y${(cur.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+      await sendGcode(`G1 X${cur.x.toFixed(3)} Y${cur.y.toFixed(3)} F${state.feedrateFine}`);
+      await waitAndSyncPos();
+    });
+  } catch(e) { log('Double check failed: ' + e.message, 'err'); hideBusy(); return; }
+
+  const ans = await askUser(
+    `T${toolIdx} — Still centered?`,
+    'Is nozzle still on reticle after move-away-and-back?',
+    [{ label: 'OK · save', kind: 'good' }, { label: 'NOK · jog more', kind: 'danger' }]
+  );
+  if (ans === 1) {
+    await promptJogUntilCentered(toolIdx);
+    return;
+  }
+  await saveAndVerifyTool(toolIdx);
+}
+
+async function saveAndVerifyTool(toolIdx) {
+  wizard(`T${toolIdx} — Saving offset`, 'Reading M114, computing new offset, writing M218 + M500…', []);
+  try {
+    const pAligned = await withBusy('Reading position', 'M114', 'M114',
+      async () => await getCurrentXY());
+    const cur = await withBusy('Reading current offsets', 'M218 (all tools)', 'M218',
+      async () => await readToolOffset(toolIdx));
+    if (!cur) throw new Error('Could not read current offsets from M218');
+
+    // Offset math derivation (Prusa Buddy convention):
+    //   M114 returns the commanded / logical nozzle position (what G1 said),
+    //   NOT the physical nozzle position if stored offset is miscalibrated.
+    //
+    //   nozzle_physical = commanded + (O_physical - O_stored)
+    //                   = M114 + (O_physical - O_stored)
+    //
+    //   User jogs until nozzle_physical = R (reticle physical location):
+    //     R = M114_aligned + (O_physical - O_stored)
+    //     O_physical = O_stored + (R - M114_aligned)
+    //
+    //   For T0 (O_stored=0): R = M114_ref. So R = state.t0RefXY.
+    //
+    // We want new_offset = O_physical (the true calibrated value):
+    //   new_offset = cur + (t0RefXY - pAligned)
+    //              = cur - (pAligned - t0RefXY)
+    const correction = {
+      x: state.t0RefXY.x - pAligned.x,
+      y: state.t0RefXY.y - pAligned.y,
+    };
+    const newOff = {
+      x: cur.x + correction.x,
+      y: cur.y + correction.y,
+      z: cur.z,  // Z preserved — never written
+    };
+
+    log(`T${toolIdx} offset math:`, 'sys');
+    log(`  P_ref     (T0 at reticle)   = (${state.t0RefXY.x.toFixed(4)}, ${state.t0RefXY.y.toFixed(4)})`, 'sys');
+    log(`  P_aligned (T${toolIdx} at reticle)  = (${pAligned.x.toFixed(4)}, ${pAligned.y.toFixed(4)})`, 'sys');
+    log(`  cur offset (M218)           = X${cur.x.toFixed(4)} Y${cur.y.toFixed(4)} Z${cur.z.toFixed(4)}`, 'sys');
+    log(`  correction = P_ref−P_align  = (${correction.x.toFixed(4)}, ${correction.y.toFixed(4)})`, 'sys');
+    log(`  new offset = cur+correction = X${newOff.x.toFixed(4)} Y${newOff.y.toFixed(4)} Z${newOff.z.toFixed(4)} (Z preserved)`, 'sys');
+
+    // Write only X and Y. Z preserved by firmware since not passed.
+    const writeCmd = `M218 T${toolIdx} X${newOff.x.toFixed(4)} Y${newOff.y.toFixed(4)}`;
+    await withBusy('Writing offset', writeCmd, writeCmd,
+      async () => {
+        await sendGcode(writeCmd);
+        await sendGcode('M500');
+      });
+
+    state.tools[toolIdx].current = newOff;
+    state.tools[toolIdx].saved = { ...newOff };
+    renderOffsetsTable();
+
+    // No tool-repick needed — firmware applies new offset to next move immediately
+    // after M218 + M500. Go directly to verification move.
+    await withBusy('Verifying position', 'Moving to reference with new offset', null,
+      async () => {
+        await sendGcode('G90');
+        await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+        await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
+        await waitAndSyncPos();
+      });
+
+    const ans = await askUser(
+      `T${toolIdx} — Verify new offset`,
+      `<b>Is T${toolIdx} nozzle centered on the reticle?</b><br>
+       <span style="color:var(--dim); font-size:10px;">If not centered exactly, click "Refine" — you'll jog the remaining small distance, and the offset will be corrected further. Multiple refinements are normal when the first alignment isn't pixel-perfect.</span>`,
+      [
+        { label: 'OK · save & next tool', kind: 'good' },
+        { label: 'Refine offset', kind: 'danger' }
+      ]
+    );
+    if (ans === 1) {
+      log(`T${toolIdx} needs refinement — jog again to correct remaining error`, 'sys');
+      await promptJogUntilCentered(toolIdx);
+      return;
+    }
+    state.tools[toolIdx].status = 'done';
+    renderOffsetsTable();
+    log(`T${toolIdx} calibrated and verified ✓`, 'sys');
+    await flowToolLoop(toolIdx + 1);
+  } catch(e) {
+    log('Save+verify failed: ' + e.message, 'err');
+    hideBusy();
+  }
+}
+
+// ============================================================
+// STAGE G — revalidation
+// ============================================================
+async function flowRevalidate() {
+  setStage('revalidate');
+  state.flaggedTools = [];
+  wizard('Stage H — Revalidation',
+    'Will now pick each tool and move to reference XY. You confirm OK/NOK for each.', [
+      { label: 'Start revalidation', kind: 'primary', onclick: () => revalidateAll() }
+    ]);
+}
+
+async function revalidateAll() {
+  for (let i = 0; i < state.numTools; i++) {
+    await revalidateTool(i);
+  }
+  if (state.flaggedTools.length === 0) {
+    // Build a compact summary of saved offsets vs. original.
+    const lines = [];
+    for (let i = 0; i < state.numTools; i++) {
+      const cur = state.tools[i] ? state.tools[i].current : null;
+      const orig = state.originalOffsets ? state.originalOffsets[i] : null;
+      if (!cur) continue;
+      if (orig) {
+        const dx = cur.x - orig.x;
+        const dy = cur.y - orig.y;
+        const changed = Math.abs(dx) > 0.0005 || Math.abs(dy) > 0.0005;
+        lines.push(
+          `T${i}: X ${cur.x.toFixed(4)} Y ${cur.y.toFixed(4)}` +
+          (changed
+            ? ` <span style="color:var(--warn)">(Δ ${dx>=0?'+':''}${dx.toFixed(4)}, ${dy>=0?'+':''}${dy.toFixed(4)})</span>`
+            : ` <span style="color:var(--dim)">(unchanged)</span>`)
+        );
+      } else {
+        lines.push(`T${i}: X ${cur.x.toFixed(4)} Y ${cur.y.toFixed(4)}`);
+      }
+    }
+    wizard('Done ✓',
+      `<span style="color:var(--good)">All ${state.numTools} tools calibrated and validated.</span><br>` +
+      `<div class="mono" style="margin-top:6px; font-size:10px; line-height:1.5;">${lines.join('<br>')}</div>`,
+      [
+        { label: 'Park T0 · finish', kind: 'good', onclick: () => finishAndPark() },
+        { label: 'Re-run revalidation', kind: '', onclick: () => revalidateAll() },
+      ]);
+    log('All tools OK. Calibration complete.', 'sys');
+  } else {
+    log(`Flagged tools: ${state.flaggedTools.join(', ')}`, 'err');
+    await recalibrateFlagged();
+  }
+}
+
+async function finishAndPark() {
+  try {
+    await withBusy('Parking T0', 'Picking T0 and moving to X50 Y50', 'T0',
+      async () => {
+        await sendGcode('T0');
+        await sendGcode('G90');
+        await sendGcode(`G1 X50 Y50 F${state.feedrateFast}`);
+        await waitAndSyncPos();
+      });
+    setCurrentToolUI(0);
+    wizard('Calibration session complete ✓',
+      `Offsets saved to EEPROM. T0 parked at X50 Y50.<br>` +
+      `<span style="color:var(--dim); font-size:10px;">Disconnect when ready, or re-run revalidation to verify.</span>`,
+      [
+        { label: 'Re-run revalidation', kind: '', onclick: () => revalidateAll() },
+        { label: 'Restore original offsets', kind: 'danger', onclick: () => restoreOriginalOffsets() },
+      ]);
+    log('Session finished — T0 parked at camera position.', 'sys');
+  } catch(e) {
+    log('Park failed: ' + e.message, 'err');
+    hideBusy();
+  }
+}
+
+async function revalidateTool(toolIdx) {
+  state.currentTool = toolIdx;
+  state.tools[toolIdx].status = toolIdx === 0 ? 'done' : 'active';
+  renderOffsetsTable();
+
+  wizard(`Revalidating T${toolIdx}`, `Picking T${toolIdx} and moving to reference XY…`, []);
+  try {
+    await withBusy(`Picking T${toolIdx}`, 'Tool change', `T${toolIdx}`,
+      async () => await sendGcode(`T${toolIdx}`));
+    await withBusy('Moving to reference', 'Overshoot + return to P_ref', null,
+      async () => {
+        await sendGcode('G90');
+        await sendGcode(`G1 X${(state.t0RefXY.x + state.overshootMm).toFixed(3)} Y${(state.t0RefXY.y + state.overshootYMm).toFixed(3)} F${state.feedrateFast}`);
+        await sendGcode(`G1 X${state.t0RefXY.x.toFixed(3)} Y${state.t0RefXY.y.toFixed(3)} F${state.feedrateFine}`);
+        await waitAndSyncPos();
+      });
+    setCurrentToolUI(toolIdx);
+  } catch(e) { log('Revalidation move failed: ' + e.message, 'err'); hideBusy(); return; }
+
+  const ans = await askUser(
+    `Revalidate T${toolIdx}`,
+    `T${toolIdx} moved to reference XY. Centered on reticle?`,
+    [{ label: 'OK', kind: 'good' }, { label: 'NOK · flag', kind: 'danger' }]
+  );
+  if (ans === 0) {
+    state.tools[toolIdx].status = 'done';
+  } else {
+    state.tools[toolIdx].status = 'flagged';
+    if (toolIdx !== 0) state.flaggedTools.push(toolIdx);
+    else log('WARNING: T0 flagged during revalidation — T0 is the reference, cannot be recalibrated by this tool. Check reticle and camera position.', 'err');
+  }
+  renderOffsetsTable();
+}
+
+async function recalibrateFlagged() {
+  const flagged = [...state.flaggedTools];
+  state.flaggedTools = [];
+  wizard('Recalibrate flagged',
+    `These tools need recalibration: <b>${flagged.map(i => 'T'+i).join(', ')}</b>. Will re-enter Stage G for each.`,
+    [{ label: 'Start', kind: 'primary', onclick: async () => {
+      for (const idx of flagged) {
+        await calibrateTool(idx);
+      }
+      // After recal, rerun revalidation to confirm
+      await revalidateAll();
+    }}]);
+}
+
+// ============================================================
+// WIRING
+// ============================================================
+$('btnRefreshCams').onclick = listCameras;
+$('btnStartCam').onclick = startCamera;
+$('btnStopCam').onclick = stopCamera;
+$('transportMode').onchange = e => { $('baudField').style.display = e.target.value === 'serial' ? '' : 'none'; };
+$('btnConnect').onclick = connectPrinter;
+$('btnDisconnect').onclick = disconnectPrinter;
+$('btnRefreshPos').onclick = async () => {
+  try { await sendGcode('M114'); } catch(e) { log(e.message, 'err'); }
+};
+$('btnRestoreOriginal').onclick = () => restoreOriginalOffsets();
+
+$('btnSendManual').onclick = async () => {
+  const c = $('manualGcode').value.trim();
+  if (!c) return;
+  try { await sendGcode(c); $('manualGcode').value = ''; }
+  catch(e) { log(e.message, 'err'); }
+};
+$('manualGcode').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnSendManual').click(); });
+
+// Init
+setStage('connect');
+renderJogPad();
+renderZJogPad();
+renderOffsetsTable();
+applyCameraDisplay();
+listCameras().catch(()=>{});
+wizard('Stage A — Connect', 'Start camera and connect printer to begin.', []);
+log('Ready. Connect camera + printer to start workflow.', 'sys');
+</script>
+</body>
+</html>
