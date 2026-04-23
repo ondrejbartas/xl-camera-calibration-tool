@@ -414,8 +414,10 @@
 
   .offsets-panel {
     border: 1px solid var(--border); background: var(--panel);
-    padding: 10px; overflow: auto;
-    flex-shrink: 0; max-height: 280px;
+    padding: 10px; overflow-y: auto;
+    flex-shrink: 1;
+    min-height: 200px;
+    max-height: 45vh;
   }
   table.offsets { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
   table.offsets th {
@@ -440,6 +442,7 @@
   .status-dot.active { background: var(--accent); animation: pulse 1.2s infinite; }
   .status-dot.done { background: var(--good); }
   .status-dot.flagged { background: var(--bad); }
+  .status-dot.skipped { background: transparent; border: 1px solid var(--dim); }
   @keyframes pulse {
     0%,100% { opacity: 1; }
     50% { opacity: 0.4; }
@@ -1067,6 +1070,11 @@ const state = {
   stage: 'connect',
   zJogEnabled: false,  // only true during Stage D
   flaggedTools: [],
+  // Tools the user has chosen to calibrate this session. Default = all non-T0
+  // tools, populated after M218 read. User can edit via picker after reticle lock.
+  // Tools NOT in this array are skipped in both Stage G (calibrate) and Stage H
+  // (revalidate) — their offsets are left untouched.
+  selectedTools: [],
   // Snapshotted at first offset read after Connect. Never mutated during session.
   // Used by "Restore original offsets" button.
   originalOffsets: null,
@@ -2118,25 +2126,49 @@ async function detectToolCount() {
     log(`(mock) Simulated ${state.numTools} tools`, 'sys');
     return;
   }
-  // Real printer: prefer M115's EXTRUDER_COUNT.
+  // Real printer: use M218's entries to detect installed tools.
+  // Prusa Buddy M218 returns entries for ALL configured slots (up to 6 on XL).
+  // Empty/disconnected slots report 0.00,0.00,0.000 — populated tools have
+  // non-zero values from factory/user calibration. T0 is always present and
+  // is always (0,0,0) by definition (reference tool).
+  //
+  // Rule: T0 is always counted. For T1..T5, count as installed IF any of
+  // X, Y, Z is non-zero.
   let n = null;
-  try {
-    const lines = await sendGcode('M115');
-    const joined = lines.join(' ');
-    const m = /EXTRUDER_COUNT\s*[:=]\s*(\d+)/i.exec(joined);
-    if (m) {
-      n = Math.max(1, Math.min(6, parseInt(m[1], 10)));
-      log(`Detected ${n} tools from M115`, 'sys');
+  const offsets = await readAllToolOffsets();
+  if (offsets && offsets.length) {
+    // Count trailing non-zero-or-T0 tools. Walk the array: T0 always counts,
+    // any Ti>0 with non-zero X/Y/Z counts. Stop at the last installed slot.
+    const isPopulated = (o) => (Math.abs(o.x) > 1e-6 || Math.abs(o.y) > 1e-6 || Math.abs(o.z) > 1e-6);
+    let lastInstalled = 0; // T0 always installed
+    for (let i = 1; i < offsets.length; i++) {
+      if (isPopulated(offsets[i])) lastInstalled = i;
     }
-  } catch(e) {
-    log('M115 failed: ' + e.message, 'err');
+    n = lastInstalled + 1;
+    // Log detection summary
+    const summary = offsets.slice(0, Math.min(6, offsets.length)).map((o, i) =>
+      `T${i}(${o.x.toFixed(2)},${o.y.toFixed(2)},${o.z.toFixed(3)})${i > 0 && !isPopulated(o) ? '=empty' : ''}`
+    ).join(' ');
+    log(`M218 scan: ${summary}`, 'sys');
+    log(`Detected ${n} installed tool${n===1?'':'s'} (T0..T${n-1})`, 'sys');
+  }
+  // Sanity check / fallback via M115
+  if (n === null) {
+    try {
+      const lines = await sendGcode('M115');
+      const joined = lines.join(' ');
+      const m = /EXTRUDER_COUNT\s*[:=]\s*(\d+)/i.exec(joined);
+      if (m) {
+        n = Math.max(1, Math.min(6, parseInt(m[1], 10)));
+        log(`Fallback: using ${n} tools from M115 EXTRUDER_COUNT`, 'sys');
+      }
+    } catch(e) {
+      log('M115 failed: ' + e.message, 'err');
+    }
   }
   if (n === null) {
-    // Fallback: read M218, count non-default entries (but this is
-    // unreliable since active tools can legitimately have 0,0,0 offset)
-    const offsets = await readAllToolOffsets();
-    n = offsets ? Math.min(6, offsets.length) : 2;
-    log(`Fallback: using ${n} tools from M218 entry count`, 'sys');
+    n = 2;
+    log('Fallback: defaulting to 2 tools', 'err');
   }
   state.numTools = n;
   state.tools = {};
@@ -2213,6 +2245,7 @@ function renderOffsetsTable() {
       active: 'picked',
       done: 'saved ✓',
       flagged: 'flagged (NOK)',
+      skipped: 'skipped',
     }[t.status] || 'pending';
     const zVal = (t.current.z !== undefined && t.current.z !== null) ? t.current.z.toFixed(3) : '—';
     const origTxt = orig
@@ -2752,54 +2785,32 @@ async function showBuildplatePrompt() {
 async function flowHome() {
   setStage('home');
   wizard('Stage C — Homing',
-    'Homing XY, picking T0, probing Z at X100 Y150 with G30, then parking at X50 Y50.',
+    'Running G28 (full home — firmware handles Z probe placement), then lowering bed and parking at X50 Y50.',
     []);
   try {
-    // 1. Home XY only — no Z probe action yet. Z axis unhomed after this.
-    await withBusy('Homing X/Y', 'Running G28 XY', 'G28 XY',
-      async () => {
-        await sendGcode('G28 XY');
-        await waitAndSyncPos();
-      });
-
-    // 2. Pick tool 0 so the right Z probe is engaged for the Z home.
+    // Pick T0 first so the Z probe on T0 is engaged for Z homing
     await withBusy('Selecting T0', 'Picking tool 0 for Z probe', 'T0',
       async () => await sendGcode('T0'));
 
-    // 3. Move tool 0 to chosen Z-probe XY. On Prusa XL, X100 Y150 is a
-    //    reasonable spot that clears the camera at X50 Y50 but still lets
-    //    the bed-mounted probe target engage (assuming standard bed).
-    //    NOTE: if Z_SAFE_HOMING in firmware is enforced, the printer may
-    //    override this and probe Z at bed center anyway. We log both
-    //    intended and actual positions via M114.
-    await withBusy('Moving to Z-probe spot', 'G1 X100 Y150', 'G1 X100 Y150',
+    // Full home — G28 handles XY + Z (firmware uses Z_SAFE_HOMING_XY_POINT for Z)
+    await withBusy('Homing all axes', 'Running G28', 'G28',
       async () => {
-        await sendGcode('G90');
-        await sendGcode('G1 X100 Y150 F3000');
-        await waitAndSyncPos();
-      });
-
-    // 4. Probe Z at the current XY (G30 = single Z probe at current
-    //    position). Unlike G28 Z, G30 does not invoke Z_SAFE_HOMING so
-    //    it actually probes where we placed the tool (X100, Y150).
-    await withBusy('Probing Z', 'G30 single Z probe at current position', 'G30',
-      async () => {
-        await sendGcode('G30');
+        await sendGcode('G28');
         await waitAndSyncPos();
       });
 
     state.homed = true;
     updateJogEnabled();
 
-    // 5. Move bed/tool for camera clearance. On Prusa XL the tool moves,
-    //    so Z=32 gives camera clearance above the bed (user tuned for usb cam).
+    // Move bed/tool for camera clearance. On Prusa XL the tool moves,
+    // so Z=32 gives camera clearance above the bed (user tuned for usb cam).
     await withBusy('Lowering bed for camera', 'Z32 for camera clearance', 'G1 Z32',
       async () => {
         await sendGcode('G1 Z32 F600');
         await waitAndSyncPos();
       });
 
-    // 6. Park T0 nozzle at camera position.
+    // Park T0 nozzle at camera position.
     await withBusy('Parking at X50 Y50', 'Nozzle to camera spot', 'G1 X50 Y50',
       async () => {
         await sendGcode('G1 X50 Y50 F3000');
@@ -2809,7 +2820,7 @@ async function flowHome() {
     state.currentTool = 0;
     setCurrentToolUI(0);
     renderOffsetsTable();
-    log('Homed (XY → T0 → G30@X100Y150 → Z32 → park X50 Y50).', 'sys');
+    log('Homed (T0 → G28 full home → Z32 clearance → park X50 Y50).', 'sys');
 
     wizard('Place camera',
       'Place the camera under the nozzle (at X50 Y50 on the bed), pointing up.',
@@ -3036,20 +3047,128 @@ function lockReticleAndBeginTools() {
   if (state.tools[0]) state.tools[0].status = 'done';
   renderOffsetsTable();
   log(`Reticle locked at pixel (${state.t0Ref.x.toFixed(1)}, ${state.t0Ref.y.toFixed(1)})`, 'sys');
-  flowToolLoop(1);
+  showToolSelectionPicker();
+}
+
+// Tool selection picker: user chooses which non-T0 tools to calibrate.
+// Default is all selected. Unselected tools are skipped entirely (both in
+// Stage G calibration and Stage H revalidation) — useful if one tool is
+// mechanically bad and you don't want to waste time on it.
+function showToolSelectionPicker() {
+  // Default: all non-T0 tools selected. If selectedTools was set previously
+  // in this session, preserve that choice.
+  // Heuristic: a tool with (0, 0, 0) offsets is likely disconnected/empty.
+  // (T0 is legitimately 0,0,0 by convention, but we exclude T0 from the picker.)
+  // Default behavior: auto-uncheck likely-disconnected tools. User can override.
+  const isLikelyEmpty = (o) =>
+    o && Math.abs(o.x) < 0.0001 && Math.abs(o.y) < 0.0001 && Math.abs(o.z) < 0.0001;
+
+  // Initialize selectedTools default: non-T0, non-empty
+  if (!state.selectedTools || !state.selectedTools.length) {
+    state.selectedTools = [];
+    for (let i = 1; i < state.numTools; i++) {
+      const o = state.originalOffsets ? state.originalOffsets[i] : null;
+      if (!isLikelyEmpty(o)) state.selectedTools.push(i);
+    }
+  }
+
+  const rows = [];
+  for (let i = 1; i < state.numTools; i++) {
+    const checked = state.selectedTools.includes(i) ? 'checked' : '';
+    const orig = state.originalOffsets ? state.originalOffsets[i] : null;
+    const origTxt = orig
+      ? `X ${orig.x.toFixed(3)} Y ${orig.y.toFixed(3)} Z ${orig.z.toFixed(3)}`
+      : 'no data';
+    const likelyEmpty = isLikelyEmpty(orig);
+    const warning = likelyEmpty
+      ? ` <span style="color:var(--warn); font-size:10px;">⚠ all zeros — likely disconnected/empty</span>`
+      : '';
+    rows.push(`
+      <label style="display:flex; align-items:center; gap:10px; padding:4px 0; cursor:pointer;">
+        <input type="checkbox" class="toolSel" data-tool="${i}" ${checked} style="width:16px; height:16px;" />
+        <span style="font-weight:700; color:var(--accent); min-width:30px;">T${i}</span>
+        <span style="color:var(--dim); font-size:10px; font-family:'JetBrains Mono', monospace;">orig: ${origTxt}</span>
+        ${warning}
+      </label>
+    `);
+  }
+
+  $('wizardPrompt').classList.remove('good');
+  $('wizardTitle').textContent = 'Choose tools to calibrate';
+  $('wizardBody').innerHTML = `
+    <div style="font-size:11px; color:var(--dim); margin-bottom:8px;">
+      Untick any tool you want to skip (e.g. mechanically bad tool).
+      Skipped tools keep their current offsets and are not revalidated.
+    </div>
+    <div style="margin:6px 0;">${rows.join('')}</div>
+    <div style="font-size:10px; color:var(--dim); margin-top:6px;">T0 is the reference tool, not calibrated.</div>
+  `;
+  $('wizardActions').innerHTML = '';
+  const btn = document.createElement('button');
+  btn.textContent = 'Start calibration →';
+  btn.classList.add('primary');
+  btn.onclick = () => {
+    // Collect selected checkboxes
+    const selected = [];
+    document.querySelectorAll('.toolSel').forEach(cb => {
+      if (cb.checked) selected.push(parseInt(cb.dataset.tool, 10));
+    });
+    if (selected.length === 0) {
+      log('No tools selected — nothing to calibrate', 'err');
+      return;
+    }
+    state.selectedTools = selected;
+    log(`Tools selected for calibration: ${selected.map(i => 'T'+i).join(', ')}`, 'sys');
+    // Mark unselected tools as status 'skipped' visually (but don't touch offset data)
+    for (let i = 1; i < state.numTools; i++) {
+      if (!selected.includes(i)) {
+        if (state.tools[i]) state.tools[i].status = 'skipped';
+      } else {
+        if (state.tools[i]) state.tools[i].status = 'pending';
+      }
+    }
+    renderOffsetsTable();
+    // Start with first selected tool
+    flowToolLoop(selected[0]);
+  };
+  $('wizardActions').appendChild(btn);
+
+  const skipAllBtn = document.createElement('button');
+  skipAllBtn.textContent = 'Skip to revalidation';
+  skipAllBtn.title = 'Skip calibration entirely; just verify existing offsets';
+  skipAllBtn.onclick = () => {
+    state.selectedTools = [];
+    log('Skipping calibration — going straight to revalidation', 'sys');
+    flowRevalidate();
+  };
+  $('wizardActions').appendChild(skipAllBtn);
 }
 
 // ============================================================
 // STAGE F — per-tool calibration
 // ============================================================
 async function flowToolLoop(toolIdx) {
-  if (toolIdx >= state.numTools) {
-    // All tools done → revalidation
+  // If no selectedTools, nothing to do → revalidate.
+  if (!state.selectedTools || state.selectedTools.length === 0) {
+    flowRevalidate();
+    return;
+  }
+  // Find position of toolIdx in selectedTools. If not found or at/past end, done.
+  const pos = state.selectedTools.indexOf(toolIdx);
+  if (pos === -1 || pos >= state.selectedTools.length) {
     flowRevalidate();
     return;
   }
   setStage('toolloop');
   await calibrateTool(toolIdx);
+}
+
+// Advance from toolIdx to the next selected tool.
+function nextSelectedTool(toolIdx) {
+  if (!state.selectedTools || !state.selectedTools.length) return null;
+  const pos = state.selectedTools.indexOf(toolIdx);
+  if (pos === -1 || pos >= state.selectedTools.length - 1) return null;
+  return state.selectedTools[pos + 1];
 }
 
 async function calibrateTool(toolIdx) {
@@ -3227,7 +3346,12 @@ async function saveAndVerifyTool(toolIdx) {
     state.tools[toolIdx].status = 'done';
     renderOffsetsTable();
     log(`T${toolIdx} calibrated and verified ✓`, 'sys');
-    await flowToolLoop(toolIdx + 1);
+    const next = nextSelectedTool(toolIdx);
+    if (next !== null) {
+      await flowToolLoop(next);
+    } else {
+      flowRevalidate();
+    }
   } catch(e) {
     log('Save+verify failed: ' + e.message, 'err');
     hideBusy();
@@ -3247,7 +3371,10 @@ async function flowRevalidate() {
 }
 
 async function revalidateAll() {
-  for (let i = 0; i < state.numTools; i++) {
+  // Revalidate T0 + all selected tools. Skipped tools are never touched.
+  const toRevalidate = [0, ...(state.selectedTools || [])];
+  for (const i of toRevalidate) {
+    if (i >= state.numTools) continue;
     await revalidateTool(i);
   }
   if (state.flaggedTools.length === 0) {
@@ -3256,29 +3383,32 @@ async function revalidateAll() {
     for (let i = 0; i < state.numTools; i++) {
       const cur = state.tools[i] ? state.tools[i].current : null;
       const orig = state.originalOffsets ? state.originalOffsets[i] : null;
+      const wasSelected = (i === 0) || (state.selectedTools || []).includes(i);
       if (!cur) continue;
-      if (orig) {
+      let suffix = '';
+      if (!wasSelected) {
+        suffix = ` <span style="color:var(--dim)">(skipped)</span>`;
+      } else if (orig) {
         const dx = cur.x - orig.x;
         const dy = cur.y - orig.y;
         const changed = Math.abs(dx) > 0.0005 || Math.abs(dy) > 0.0005;
-        lines.push(
-          `T${i}: X ${cur.x.toFixed(4)} Y ${cur.y.toFixed(4)}` +
-          (changed
-            ? ` <span style="color:var(--warn)">(Δ ${dx>=0?'+':''}${dx.toFixed(4)}, ${dy>=0?'+':''}${dy.toFixed(4)})</span>`
-            : ` <span style="color:var(--dim)">(unchanged)</span>`)
-        );
-      } else {
-        lines.push(`T${i}: X ${cur.x.toFixed(4)} Y ${cur.y.toFixed(4)}`);
+        suffix = changed
+          ? ` <span style="color:var(--warn)">(Δ ${dx>=0?'+':''}${dx.toFixed(4)}, ${dy>=0?'+':''}${dy.toFixed(4)})</span>`
+          : ` <span style="color:var(--dim)">(unchanged)</span>`;
       }
+      lines.push(`T${i}: X ${cur.x.toFixed(4)} Y ${cur.y.toFixed(4)}${suffix}`);
     }
+    const validatedCount = toRevalidate.length;
+    const skippedCount = state.numTools - validatedCount;
     wizard('Done ✓',
-      `<span style="color:var(--good)">All ${state.numTools} tools calibrated and validated.</span><br>` +
+      `<span style="color:var(--good)">${validatedCount} tool${validatedCount===1?'':'s'} validated.</span>` +
+      (skippedCount > 0 ? ` <span style="color:var(--dim)">${skippedCount} skipped.</span>` : '') + `<br>` +
       `<div class="mono" style="margin-top:6px; font-size:10px; line-height:1.5;">${lines.join('<br>')}</div>`,
       [
         { label: 'Park T0 · finish', kind: 'good', onclick: () => finishAndPark() },
         { label: 'Re-run revalidation', kind: '', onclick: () => revalidateAll() },
       ]);
-    log('All tools OK. Calibration complete.', 'sys');
+    log('Calibration complete. Revalidated: ' + toRevalidate.map(i=>'T'+i).join(', '), 'sys');
   } else {
     log(`Flagged tools: ${state.flaggedTools.join(', ')}`, 'err');
     await recalibrateFlagged();
